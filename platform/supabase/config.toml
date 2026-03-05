@@ -1,0 +1,16 @@
+project_id = "hebppbhzdylqiyfpolyb"
+
+[functions.extract-memory]
+verify_jwt = false
+
+[functions.ai-visual-control]
+verify_jwt = false
+
+[functions.get-unlocked-media]
+verify_jwt = false
+
+[functions.serve-image]
+verify_jwt = false
+
+[functions.batch-media-access]
+verify_jwt = false

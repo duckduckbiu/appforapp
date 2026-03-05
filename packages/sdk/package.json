@@ -1,0 +1,19 @@
+{
+  "name": "@billai/app-sdk",
+  "version": "0.0.1",
+  "description": "SDK for apps running inside the Bill.ai platform",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "files": ["src"],
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "penpal": "^6.2.2"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "license": "MIT"
+}

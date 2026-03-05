@@ -1,0 +1,26 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "platform-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 8080,
+      "cwd": "platform"
+    },
+    {
+      "name": "rich-game-frontend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 4200,
+      "cwd": "/Users/dzfk/Desktop/rich game/frontend"
+    },
+    {
+      "name": "rich-game-backend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 4000,
+      "cwd": "/Users/dzfk/Desktop/rich game/backend"
+    }
+  ]
+}
