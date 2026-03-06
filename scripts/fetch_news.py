@@ -168,7 +168,7 @@ def fetch_fundus(db) -> int:
         return 0
 
     print(f"[fundus] crawling {len(collections)} country collections, max {MAX_FUNDUS_ARTICLES} articles")
-    crawler = Crawler(*collections, timeout=FETCH_TIMEOUT_S)
+    crawler = Crawler(*collections)
     inserted = 0
 
     try:
