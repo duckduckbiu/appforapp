@@ -224,21 +224,22 @@ async def extract_full_article(article_url: str) -> Optional[dict]:
 
 
 async def polish_article(title: str, content: str) -> Optional[dict]:
-    """Use Gemini to rewrite an article for copyright safety."""
-    llm = _make_llm()
+    """Use LLM to rewrite an article for copyright safety."""
+    from langchain_core.messages import HumanMessage
 
+    llm = _make_llm()
     prompt = POLISH_PROMPT_TEMPLATE.format(title=title, content=content[:8000])
 
     for attempt in range(3):
         try:
-            response = await llm.ainvoke(prompt)
+            response = await llm.ainvoke([HumanMessage(content=prompt)])
             result_text = response.content if hasattr(response, "content") else str(response)
             polished = _parse_json_object(result_text)
             if polished:
                 return polished
         except Exception as e:
             err_str = str(e)
-            if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+            if "429" in err_str or "rate" in err_str.lower():
                 wait = (attempt + 1) * 30
                 print(f"    [polish] rate limited, waiting {wait}s (attempt {attempt+1}/3)")
                 await asyncio.sleep(wait)
