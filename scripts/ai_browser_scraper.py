@@ -140,10 +140,10 @@ Return ONLY a JSON object (no other text):
 
 async def extract_articles_from_site(source_url: str, source_name: str, max_articles: int) -> list[dict]:
     """Use browser-use to visit a news site and extract article list."""
-    from browser_use import Agent, BrowserSession, BrowserProfile, ChatGoogle
+    from browser_use import Agent, BrowserSession, ChatGoogle
 
     llm = ChatGoogle(model="gemini-2.5-flash")
-    browser = BrowserSession(BrowserProfile(headless=True))
+    browser = BrowserSession(headless=True)
 
     try:
         task = EXTRACT_TASK_TEMPLATE.format(url=source_url, max_articles=max_articles)
@@ -171,10 +171,10 @@ async def extract_articles_from_site(source_url: str, source_name: str, max_arti
 
 async def extract_full_article(article_url: str) -> Optional[dict]:
     """Use browser-use to extract full content of a single article."""
-    from browser_use import Agent, BrowserSession, BrowserProfile, ChatGoogle
+    from browser_use import Agent, BrowserSession, ChatGoogle
 
     llm = ChatGoogle(model="gemini-2.5-flash")
-    browser = BrowserSession(BrowserProfile(headless=True))
+    browser = BrowserSession(headless=True)
 
     try:
         task = EXTRACT_ARTICLE_TASK_TEMPLATE.format(url=article_url)
