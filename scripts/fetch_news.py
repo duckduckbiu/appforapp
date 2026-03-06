@@ -35,9 +35,8 @@ SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
 SOURCE_ARG = os.environ.get("SOURCE", "both")  # "fundus" | "gdelt" | "both"
 
-MAX_FUNDUS_ARTICLES = 50   # per run (across all publishers)
-MAX_GDELT_PER_QUERY = 20   # per GDELT query
-FETCH_TIMEOUT_S = 15       # seconds per HTTP request
+MAX_FUNDUS_ARTICLES = int(os.environ.get("MAX_FUNDUS_ARTICLES", "50"))
+MAX_GDELT_PER_QUERY = int(os.environ.get("MAX_GDELT_PER_QUERY", "20"))
 
 # ISO 639 → 2-letter code used in aggregated_feed.language
 LANG_MAP: dict[str, str] = {
@@ -61,19 +60,14 @@ LANG_MAP: dict[str, str] = {
 }
 
 # GDELT supplementary queries: (search terms, GDELT lang code, tags for DB)
-# These cover topics and languages NOT well-served by fundus publishers
+# Reduced to 8 queries to stay under rate limits.
+# Korean (kor) removed — GDELT API returns invalid JSON for that lang code.
 GDELT_QUERIES: list[tuple[str, str, list[str]]] = [
-    # English — world & tech
-    ("breaking news world", "eng", ["world"]),
-    ("technology artificial intelligence", "eng", ["tech"]),
-    ("economy markets finance", "eng", ["finance"]),
-    ("science climate environment", "eng", ["science"]),
-    ("politics government elections", "eng", ["politics"]),
+    # English — combine topics to reduce query count
+    ("breaking news world politics government", "eng", ["world", "politics"]),
+    ("technology artificial intelligence economy finance", "eng", ["tech", "finance"]),
     # Chinese
-    ("科技 人工智能 创新", "zho", ["tech"]),
-    ("世界新闻 政治 经济", "zho", ["world"]),
-    # Korean
-    ("세계 뉴스 기술 경제", "kor", ["world", "tech"]),
+    ("科技 人工智能 创新 经济 世界新闻", "zho", ["tech", "world"]),
     # Japanese
     ("テクノロジー 世界ニュース 経済", "jpn", ["world", "tech"]),
     # Spanish
@@ -82,12 +76,8 @@ GDELT_QUERIES: list[tuple[str, str, list[str]]] = [
     ("politique économie technologie monde", "fra", ["world", "tech"]),
     # German
     ("Technologie Wirtschaft Politik Welt", "deu", ["world", "tech"]),
-    # Portuguese
-    ("tecnologia política economia mundo", "por", ["world"]),
     # Arabic
     ("أخبار العالم تكنولوجيا", "ara", ["world", "tech"]),
-    # Russian
-    ("технологии мировые новости экономика", "rus", ["world", "tech"]),
 ]
 
 
@@ -196,7 +186,18 @@ def fetch_fundus(db) -> int:
     try:
         for article in crawler.crawl(max_articles=MAX_FUNDUS_ARTICLES):
             try:
-                url = str(article.source_url)
+                # fundus stores the URL on article.html.requested_url (not source_url)
+                html_obj = getattr(article, "html", None)
+                url = (
+                    getattr(html_obj, "requested_url", None)
+                    or getattr(html_obj, "responded_url", None)
+                    or getattr(article, "url", None)
+                    or getattr(article, "article_url", None)
+                    or ""
+                )
+                url = str(url).strip()
+                if not url:
+                    continue
 
                 # Publisher name
                 pub = getattr(article, "publisher", None)
@@ -292,13 +293,14 @@ def query_gdelt(query: str, lang_code: str, max_records: int = 20) -> list[dict]
                 "mode": "artlist",
                 "format": "json",
                 "maxrecords": max_records,
-                "timespan": "1h",
+                "timespan": "2h",
                 "sort": "DateDesc",
             },
             timeout=30,
         )
         resp.raise_for_status()
-        return resp.json().get("articles", [])
+        data = resp.json()
+        return data.get("articles") or []
     except Exception as e:
         print(f"  [GDELT] query error for '{query[:40]}': {e}")
         return []
@@ -349,8 +351,19 @@ def fetch_gdelt(db) -> int:
             domain = art.get("domain", "unknown")
             source_id = url_hash(url)
 
-            if already_exists(db, domain, source_id):
-                continue
+            # Quick pre-check: skip if already fetched (avoids expensive trafilatura call)
+            try:
+                existing = (
+                    db.table("aggregated_feed")
+                    .select("id, full_content_status")
+                    .eq("url", url)
+                    .limit(1)
+                    .execute()
+                )
+                if existing.data and existing.data[0].get("full_content_status") == "fetched":
+                    continue
+            except Exception:
+                pass
 
             # Extract full text
             extracted = extract_trafilatura(url)
@@ -402,7 +415,8 @@ def fetch_gdelt(db) -> int:
                 updated += 1
                 print(f"    ↑ [{lang}] {title_short}")
 
-        time.sleep(1)  # be polite to GDELT between queries
+        # Rate-limit: GDELT returns 429 if queried too fast
+        time.sleep(4)
 
     print(f"[GDELT] inserted={inserted} updated={updated}")
     return inserted + updated
