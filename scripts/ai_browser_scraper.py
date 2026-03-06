@@ -302,6 +302,13 @@ async def extract_full_article(article_url: str) -> Optional[dict]:
         print(f"    [extract] trafilatura returned nothing")
         return None
 
+    # Convert trafilatura's <graphic src="..."/> to standard <img> tags
+    html_content = re.sub(
+        r'<graphic\s+src="([^"]+)"\s*/?>',
+        r'<figure><img src="\1" loading="lazy" style="max-width:100%;border-radius:8px;margin:1em 0"/></figure>',
+        html_content,
+    )
+
     full_text = html_content
 
     # Extract images from the HTML
