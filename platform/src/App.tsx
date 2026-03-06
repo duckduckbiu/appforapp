@@ -30,6 +30,18 @@ const PermissionsList = lazy(() => import("./pages/PermissionsList"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 const Admin = lazy(() => import("./pages/Admin"));
 const SetupAdmin = lazy(() => import("./pages/SetupAdmin"));
+const AdminGuard = lazy(() => import("./components/admin/AdminGuard"));
+const AdminLayout = lazy(() => import("./components/admin/AdminLayout"));
+const AdminOverview = lazy(() => import("./pages/admin/AdminOverview"));
+const AdminFeedSources = lazy(() => import("./pages/admin/AdminFeedSources"));
+const AdminBanManagement = lazy(() => import("./pages/admin/AdminBanManagement"));
+const AdminPlatformSettings = lazy(() => import("./pages/admin/AdminPlatformSettings"));
+const AdminFeedDashboard = lazy(() => import("./pages/admin/AdminFeedDashboard"));
+const AdminFeedArticles = lazy(() => import("./pages/admin/AdminFeedArticles"));
+const AdminFeedCategories = lazy(() => import("./pages/admin/AdminFeedCategories"));
+const AdminFeedReports = lazy(() => import("./pages/admin/AdminFeedReports"));
+const AdminFeedInteractions = lazy(() => import("./pages/admin/AdminFeedInteractions"));
+const ComingSoon = lazy(() => import("./components/admin/ComingSoon"));
 const PostCreate = lazy(() => import("./pages/PostCreate"));
 const Feed = lazy(() => import("./pages/Feed"));
 const PostDetail = lazy(() => import("./pages/PostDetail"));
@@ -94,7 +106,7 @@ const App = () => {
                     <TooltipProvider>
                       <Toaster />
                       <Sonner />
-                      <BrowserRouter>
+                      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
               <Routes>
               {/* Auth page — public, no layout */}
               <Route path="/auth" element={<Suspense fallback={<PageFallback />}><Auth /></Suspense>} />
@@ -135,7 +147,28 @@ const App = () => {
               <Route path="/blacklist" element={<ProtectedPage><BlacklistManagement /></ProtectedPage>} />
               <Route path="/notifications" element={<ProtectedPage><Notifications /></ProtectedPage>} />
               <Route path="/permissions" element={<ProtectedPage><PermissionsList /></ProtectedPage>} />
-              <Route path="/admin" element={<ProtectedPage><Admin /></ProtectedPage>} />
+              {/* ── Admin dashboard — no MainLayout ─── */}
+              <Route path="/admin" element={
+                <RequireAuth>
+                  <Suspense fallback={<PageFallback />}>
+                    <AdminGuard />
+                  </Suspense>
+                </RequireAuth>
+              }>
+                <Route element={<Suspense fallback={<PageFallback />}><AdminLayout /></Suspense>}>
+                  <Route index element={<Suspense fallback={<PageFallback />}><Admin /></Suspense>} />
+                  <Route path="overview" element={<Suspense fallback={<PageFallback />}><AdminOverview /></Suspense>} />
+                  <Route path="content/discover/sources" element={<Suspense fallback={<PageFallback />}><AdminFeedSources /></Suspense>} />
+                  <Route path="content/discover/dashboard" element={<Suspense fallback={<PageFallback />}><AdminFeedDashboard /></Suspense>} />
+                  <Route path="content/discover/articles" element={<Suspense fallback={<PageFallback />}><AdminFeedArticles /></Suspense>} />
+                  <Route path="content/discover/categories" element={<Suspense fallback={<PageFallback />}><AdminFeedCategories /></Suspense>} />
+                  <Route path="content/discover/reports" element={<Suspense fallback={<PageFallback />}><AdminFeedReports /></Suspense>} />
+                  <Route path="content/discover/interactions" element={<Suspense fallback={<PageFallback />}><AdminFeedInteractions /></Suspense>} />
+                  <Route path="users/bans" element={<Suspense fallback={<PageFallback />}><AdminBanManagement /></Suspense>} />
+                  <Route path="system/settings" element={<Suspense fallback={<PageFallback />}><AdminPlatformSettings /></Suspense>} />
+                  <Route path="*" element={<Suspense fallback={<PageFallback />}><ComingSoon /></Suspense>} />
+                </Route>
+              </Route>
               <Route path="/setup-admin" element={<ProtectedPage><SetupAdmin /></ProtectedPage>} />
               <Route path="/post/create" element={<ProtectedPage><PostCreate /></ProtectedPage>} />
               <Route path="/post/:postId" element={<ProtectedPage><PostDetail /></ProtectedPage>} />

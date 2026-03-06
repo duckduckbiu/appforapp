@@ -1,0 +1,63 @@
+{
+  "nav": {
+    "messages": "Messages",
+    "feed": "Feed",
+    "ai": "AI",
+    "apps": "Apps",
+    "me": "Me"
+  },
+  "auth": {
+    "login": "Login",
+    "register": "Register",
+    "email": "Email",
+    "password": "Password",
+    "loginWithGoogle": "Login with Google",
+    "loginWithApple": "Login with Apple"
+  },
+  "common": {
+    "loading": "Loading...",
+    "error": "Error",
+    "retry": "Retry",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "save": "Save",
+    "delete": "Delete",
+    "search": "Search",
+    "back": "Back",
+    "more": "More"
+  },
+  "feed": {
+    "recommend": "Recommended",
+    "following": "Following",
+    "friends": "Friends",
+    "nearby": "Nearby",
+    "newPost": "New Post",
+    "refresh": "Refresh"
+  },
+  "messaging": {
+    "selectChat": "Select a chat to start",
+    "newMessage": "New Message"
+  },
+  "me": {
+    "settings": "Settings",
+    "privacy": "Privacy",
+    "friends": "Friends",
+    "logout": "Logout",
+    "darkMode": "Dark Mode"
+  },
+  "settings": {
+    "language": "Language",
+    "languageDescription": "UI language and default language for news content",
+    "profileUpdated": "Profile updated",
+    "privacySaved": "Privacy settings saved"
+  },
+  "store": {
+    "title": "App Store",
+    "install": "Install",
+    "open": "Open"
+  },
+  "ai": {
+    "title": "AI Assistant",
+    "placeholder": "Describe what you want..."
+  }
+}

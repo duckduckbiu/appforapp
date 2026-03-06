@@ -1,0 +1,108 @@
+name: Scheduled Feed Fetch (RSS — DEPRECATED)
+
+# ⚠️  DEPRECATED: Replaced by gdelt-fundus-fetch.yml
+# Cron schedule removed. Keep for manual triggering only if needed.
+# The new pipeline uses GDELT + fundus + trafilatura (no RSS).
+
+on:
+  workflow_dispatch:
+    inputs:
+      batch_group:
+        description: 'Batch group to fetch (0-5, leave empty for all)'
+        required: false
+        default: ''
+      force:
+        description: 'Force fetch even if interval not elapsed'
+        required: false
+        default: 'false'
+      skip_extraction:
+        description: 'Skip article extraction after fetch'
+        required: false
+        default: 'false'
+
+jobs:
+  fetch-feed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Determine batch group from schedule
+        id: batch
+        run: |
+          MINUTE=$(date -u +%M | sed 's/^0*//')
+          MINUTE=${MINUTE:-0}
+          INPUT="${{ github.event.inputs.batch_group }}"
+          if [ -n "$INPUT" ]; then
+            echo "group=$INPUT" >> $GITHUB_OUTPUT
+          elif [ $((MINUTE % 30)) -eq 0 ] || [ $((MINUTE % 30)) -eq 0 ]; then
+            echo "group=0" >> $GITHUB_OUTPUT
+          elif [ $((MINUTE % 5)) -eq 0 ]; then
+            GROUP=$(( (MINUTE % 30) / 5 ))
+            echo "group=$GROUP" >> $GITHUB_OUTPUT
+          else
+            echo "group=" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Trigger feed fetch
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          BATCH_GROUP: ${{ steps.batch.outputs.group }}
+          FORCE: ${{ github.event.inputs.force || 'false' }}
+        run: |
+          # Build request body
+          if [ -n "$BATCH_GROUP" ] && [ "$BATCH_GROUP" != "" ]; then
+            BODY="{\"batch_group\": $BATCH_GROUP, \"force\": $FORCE}"
+          else
+            BODY="{\"force\": $FORCE}"
+          fi
+
+          echo "Calling Edge Function with body: $BODY"
+
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            -X POST \
+            "$SUPABASE_URL/functions/v1/fetch-aggregated-feed" \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+            -H "Content-Type: application/json" \
+            -d "$BODY")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY_RESP=$(echo "$RESPONSE" | head -n-1)
+
+          echo "HTTP Status: $HTTP_CODE"
+          echo "Response: $BODY_RESP"
+
+          if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+            echo "::error::Feed fetch failed with HTTP $HTTP_CODE"
+            exit 1
+          fi
+
+          echo "✅ Feed fetch completed successfully"
+
+      - name: Trigger article extraction
+        if: ${{ github.event.inputs.skip_extraction != 'true' }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          echo "Triggering full-text extraction for pending articles..."
+
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            -X POST \
+            "$SUPABASE_URL/functions/v1/extract-full-article" \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{\"limit\": 10}")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY_RESP=$(echo "$RESPONSE" | head -n-1)
+
+          echo "HTTP Status: $HTTP_CODE"
+          echo "Response: $BODY_RESP"
+
+          # Extraction failure is non-fatal (best effort)
+          if [ "$HTTP_CODE" -lt 200 ] || [ "$HTTP_CODE" -ge 300 ]; then
+            echo "::warning::Article extraction failed with HTTP $HTTP_CODE (non-fatal)"
+          else
+            echo "✅ Article extraction completed"
+          fi

@@ -7,7 +7,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
-import { Bot, Settings2, Shield, Bell, Lock } from "lucide-react";
+import { Bot, Settings2, Shield, Bell, Lock, Globe } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { QRCodeSVG } from "qrcode.react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -23,10 +24,14 @@ import { useAppPermissions } from "@/contexts/AppPermissionsContext";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { AlertCircle, Camera, Mic, HardDrive, MessageSquare, Sparkles, Image as ImageIcon, MapPin, Bluetooth, Users, ClipboardList, Wallet, RefreshCw, Activity, Download, Send, Zap } from "lucide-react";
 
+import { useEnabledLanguages } from "@/hooks/usePlatformLanguages";
+
 export default function UserSettings() {
   const navigate = useNavigate();
   const { currentIdentity, refreshIdentities } = useIdentity();
   const { groupedPermissions, loading: permissionsLoading, updatePermission } = useAppPermissions();
+  const { i18n } = useTranslation();
+  const { data: enabledLanguages } = useEnabledLanguages();
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
@@ -38,6 +43,7 @@ export default function UserSettings() {
     bio: "",
     avatar_url: "",
     cover_url: "",
+    preferred_language: "zh-CN",
   });
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [coverFile, setCoverFile] = useState<File | null>(null);
@@ -92,15 +98,21 @@ export default function UserSettings() {
       if (error) throw error;
 
       if (data) {
+        const lang = data.preferred_language || i18n.language || "zh-CN";
         setProfile({
           unique_username: data.unique_username || "",
           display_name: data.display_name || "",
           bio: data.bio || "",
           avatar_url: data.avatar_url || "",
           cover_url: data.cover_url || "",
+          preferred_language: lang,
         });
         setAvatarPreview(data.avatar_url || "");
         setCoverPreview(data.cover_url || "");
+        // Sync i18n language from DB preference
+        if (data.preferred_language && data.preferred_language !== i18n.language) {
+          i18n.changeLanguage(data.preferred_language);
+        }
         
         // 加载隐私设置
         const privacy = data.privacy_settings as any;
@@ -243,10 +255,16 @@ export default function UserSettings() {
           bio: profile.bio,
           avatar_url: avatarUrl,
           cover_url: coverUrl,
-        })
+          preferred_language: profile.preferred_language,
+        } as Record<string, unknown>)
         .eq("id", userId);
 
       if (error) throw error;
+
+      // Sync i18n to match saved preference
+      if (profile.preferred_language !== i18n.language) {
+        i18n.changeLanguage(profile.preferred_language);
+      }
 
       setProfile(prev => ({ ...prev, avatar_url: avatarUrl, cover_url: coverUrl }));
       setAvatarFile(null);
@@ -396,6 +414,36 @@ export default function UserSettings() {
                       onChange={(e) => setProfile({ ...profile, display_name: e.target.value })}
                       placeholder="输入显示名称"
                     />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>语言 / Language</Label>
+                    <div className="flex items-center gap-3">
+                      <Globe className="h-4 w-4 text-muted-foreground shrink-0" />
+                      <Select
+                        value={profile.preferred_language}
+                        onValueChange={(value) =>
+                          setProfile({ ...profile, preferred_language: value })
+                        }
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(enabledLanguages || []).map((lang) => (
+                            <SelectItem key={lang.code} value={lang.code}>
+                              <span className="flex items-center gap-2">
+                                <span>{lang.flag}</span>
+                                <span>{lang.label_native}</span>
+                              </span>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      界面语言及新闻内容的默认语言
+                    </p>
                   </div>
 
                   <div className="space-y-2">

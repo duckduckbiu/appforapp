@@ -126,7 +126,7 @@ export default function Me() {
             <Separator />
             <div className="py-2">
               <p className="px-4 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">管理</p>
-              <MenuItem icon={Shield} label="平台管理" onClick={() => navigate("/admin")} />
+              <MenuItem icon={Shield} label="平台管理" onClick={() => navigate("/admin/overview")} />
             </div>
           </>
         )}

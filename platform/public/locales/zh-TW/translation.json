@@ -1,0 +1,63 @@
+{
+  "nav": {
+    "messages": "消息",
+    "feed": "动态",
+    "ai": "AI",
+    "apps": "应用",
+    "me": "我的"
+  },
+  "auth": {
+    "login": "登录",
+    "register": "注册",
+    "email": "邮箱",
+    "password": "密码",
+    "loginWithGoogle": "使用 Google 登录",
+    "loginWithApple": "使用 Apple 登录"
+  },
+  "common": {
+    "loading": "加载中...",
+    "error": "出错了",
+    "retry": "重试",
+    "cancel": "取消",
+    "confirm": "确认",
+    "save": "保存",
+    "delete": "删除",
+    "search": "搜索",
+    "back": "返回",
+    "more": "更多"
+  },
+  "feed": {
+    "recommend": "推荐",
+    "following": "关注",
+    "friends": "好友",
+    "nearby": "附近",
+    "newPost": "发帖",
+    "refresh": "刷新"
+  },
+  "messaging": {
+    "selectChat": "选择一个对话开始聊天",
+    "newMessage": "新消息"
+  },
+  "me": {
+    "settings": "设置",
+    "privacy": "隐私",
+    "friends": "好友",
+    "logout": "退出登录",
+    "darkMode": "深色模式"
+  },
+  "settings": {
+    "language": "语言",
+    "languageDescription": "界面语言及新闻内容的默认语言",
+    "profileUpdated": "个人资料已更新",
+    "privacySaved": "隐私设置已保存"
+  },
+  "store": {
+    "title": "应用商店",
+    "install": "安装",
+    "open": "打开"
+  },
+  "ai": {
+    "title": "AI 助手",
+    "placeholder": "描述你想做的...."
+  }
+}

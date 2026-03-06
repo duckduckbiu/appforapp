@@ -365,3 +365,522 @@
 
 - ✅ tsc --noEmit 通过
 - ✅ npm run build 通过
+
+---
+
+### 17. i18n 国际化基础设施搭建
+
+**新建文件**：
+- `platform/src/lib/i18n.ts`（新建）— i18next 配置，HttpBackend 加载翻译 JSON，LanguageDetector 自动检测语言（localStorage > navigator），fallback 中文
+- `platform/public/locales/zh/translation.json`（新建）— 中文翻译文件，覆盖 nav/auth/common/feed/messaging/me/store/ai 共 34 个 key
+- `platform/public/locales/en/translation.json`（新建）— 英文翻译文件，同结构 34 个 key
+- `platform/src/components/LanguageSwitcher.tsx`（新建）— 语言切换下拉组件，使用 shadcn Select，支持中文/English 切换
+
+**修改文件**：
+- `platform/src/main.tsx`（修改）— 添加 `import '@/lib/i18n'` 初始化国际化（仅新增一行 import）
+
+**依赖新增**：react-i18next、i18next、i18next-browser-languagedetector、i18next-http-backend
+
+**说明**：
+- 本次仅搭建基础设施，未替换现有组件中的硬编码文字
+- 翻译 key 使用嵌套对象结构（`nav.messages`、`common.loading` 等）
+- LanguageSwitcher 组件已就绪，可在需要时集成到 TopHeader 或设置页
+- 后续任务：逐步将各页面/组件的硬编码文字替换为 `t('key')` 调用
+
+- ✅ tsc --noEmit 通过
+- ✅ npm run build 通过
+
+---
+
+### 18. Feed 聚合 MVP（冷启动内容）
+
+**新建文件**：
+- `platform/supabase/migrations/20260306000000_feed_aggregation.sql`（新建）— `aggregated_feed` + `feed_sources` 表，公开读 RLS，默认 3 个数据源（HN Top + Reddit r/technology + r/programming）
+- `platform/supabase/functions/fetch-aggregated-feed/index.ts`（新建）— Deno Edge Function，拉取 HN topstories（前 30）+ Reddit hot 帖子，upsert 到 aggregated_feed 表，使用 service role key 写入
+- `platform/src/hooks/useAggregatedFeed.ts`（新建）— React Query hook，查询 aggregated_feed 表，支持按 source 过滤，staleTime 5 分钟
+
+**修改文件**：
+- `platform/src/pages/Feed.tsx`（修改）— 新增"发现" Tab 作为第一个 Tab（原 4 Tab → 5 Tab）；发现 Tab 显示聚合内容卡片（来源图标 + 标题 + 摘要 + 原文链接 + 时间）；支持按来源过滤（全部/HN/Reddit）；点击卡片新窗口打开原文；底部"查看更多"按钮；骨架屏加载态；空态提示
+
+**新建 DB 表**：`aggregated_feed`、`feed_sources`
+
+**架构参考**：`docs/architecture/24-feed-aggregation.md`
+
+**设计决策**：
+- 聚合表使用 `(supabase as any).from(...)` 绕过自动生成类型限制（表不在 types.ts 中）
+- Edge Function 使用 `SUPABASE_SERVICE_ROLE_KEY` 绕过 RLS 写入
+- HN 并行拉取（每批 10 条），Reddit 设置自定义 User-Agent 避免 429
+- 发现 Tab 默认选中，为冷启动提供首屏内容
+
+- ✅ tsc --noEmit 通过
+- ✅ npm run build 通过
+
+---
+
+### 19. 测试基础设施搭建（Vitest）
+
+**新建文件**：
+- `platform/vitest.config.ts`（新建）— Vitest 配置，jsdom 环境，globals 模式，v8 覆盖率，排除 ui/integrations 目录
+- `platform/src/__tests__/setup.ts`（新建）— 测试 setup，Supabase 全局 mock，window.matchMedia mock，afterEach cleanup
+- `platform/src/__tests__/utils.test.ts`（新建）— cn() 工具函数示范测试（3 cases）
+- `platform/src/__tests__/RequireAuth.test.tsx`（新建）— RequireAuth 组件示范测试（3 cases：loading/authed/redirect）
+
+**修改文件**：
+- `platform/package.json`（修改）— 新增 test/test:watch/test:coverage scripts；新增 devDependencies：vitest、@testing-library/react、@testing-library/jest-dom、@testing-library/user-event、@testing-library/dom、jsdom、@vitest/coverage-v8
+
+- ✅ tsc --noEmit 通过
+- ✅ npm run build 通过
+- ✅ npm test 通过（2 suites, 6 tests）
+
+---
+
+### 20. CI/CD 管线搭建（GitHub Actions）
+
+**新建文件**：
+- `.github/workflows/ci.yml`（新建）— 三阶段 CI：lint-and-typecheck → build → test；Node 20 + npm ci；build artifact 上传供 test 阶段使用
+- `.github/pull_request_template.md`（新建）— PR 模板，含变更类型 checkbox + 测试清单
+- `.github/ISSUE_TEMPLATE/bug_report.yml`（新建）— Bug 报告模板
+- `.github/ISSUE_TEMPLATE/feature_request.yml`（新建）— 功能请求模板
+- `.github/dependabot.yml`（新建）— 每周自动检测 npm 依赖更新
+
+- ✅ tsc --noEmit 通过
+- ✅ npm run build 通过
+
+---
+
+### 21. 发现 Tab 内容质量优化
+
+**修改文件**：
+- `platform/src/hooks/useAggregatedFeed.ts`（修改）— 客户端 fallback 从单一 r/technology 扩展到 4 个新闻向子版（worldnews、news、science、technology），并行拉取；每个源 8 条以保持多样性
+- `platform/src/pages/Feed.tsx`（修改）— 卡片重设计为新闻应用风格：移除 Card 组件包裹改用 border-b 分割；新增分类标签（国际/新闻/科学/科技/编程）带颜色编码；标题字号加大 + hover 变色；热度数字格式化（1000 → 1.0k）；筛选按钮添加图标；移除未使用的 Card/Badge/Clock 导入
+
+**内容改进**：
+- 增加新闻覆盖面：worldnews（国际）、news（新闻）、science（科学）+ 原有 technology
+- 分类标签颜色编码：红色=国际/新闻、紫色=科学、蓝色=科技、绿色=编程
+- 卡片 UX：hover 高亮、更紧凑的 meta 行、热度格式化
+
+- ✅ tsc --noEmit 通过
+- ✅ npm run build 通过
+
+---
+
+### 22. 新闻聚合系统 v2：RSS 通用解析 + 后台管理 + 多源预置
+
+**新建文件**：
+- `platform/supabase/migrations/20260306100000_feed_sources_upgrade.sql`（新建）— feed_sources 表新增 source_url/category/language/icon_url/description/item_count/error_count/last_error 字段；管理员写入 RLS；预置 19 个 RSS 源（BBC/Reuters/AP/TechCrunch/Ars Technica/The Verge/Wired/Nature/CNBC/少数派/36氪/V2EX/InfoQ/澎湃 + Reddit worldnews/science）
+- `platform/src/components/admin/FeedSourcesManager.tsx`（新建）— 新闻源 CRUD 管理组件：源列表（开关/分类/类型/语言/状态/错误信息）；添加/编辑 Dialog（名称/类型/分类/语言/URL/抓取间隔/条数/描述）；一键触发抓取按钮；删除确认
+
+**修改文件**：
+- `platform/supabase/functions/fetch-aggregated-feed/index.ts`（重写）— 新增通用 RSS XML 解析器（deno_dom DOMParser）；支持 RSS 2.0 + Atom 格式；图片提取链：media:content → media:thumbnail → enclosure → description 内 img 标签；保留 HN/Reddit 专用解析器；5 并发批量处理 + 10s 超时；错误记录到 feed_sources（error_count/last_error）
+- `platform/src/pages/Admin.tsx`（修改）— 导入并集成 FeedSourcesManager 组件
+- `platform/src/pages/Feed.tsx`（修改）— 筛选从 source 类型（hackernews/reddit）改为 category 分类（新闻/科技/科学/财经）；图标更新（Newspaper/FlaskConical/TrendingUp）
+- `platform/src/hooks/useAggregatedFeed.ts`（修改）— DB 查询从 `eq("source")` 改为 `contains("tags", [category])` 支持分类过滤；limit 30 → 40
+
+**预置 RSS 源（19 个）**：
+
+| 分类 | 源 | 语言 |
+|------|-----|------|
+| 新闻 | BBC World / Reuters / AP News / Al Jazeera / 澎湃新闻 | en/zh |
+| 科技 | TechCrunch / Ars Technica / The Verge / Wired / 少数派 / 36氪 / V2EX / InfoQ | en/zh |
+| 科学 | Nature News / Science Daily | en |
+| 财经 | CNBC Top News | en |
+| Reddit | r/worldnews / r/science | en |
+
+**架构**：RSSHub 公共实例用于无原生 RSS 的中文站（36氪/V2EX/InfoQ/澎湃/AP News）
+
+- ✅ tsc --noEmit 通过
+- ✅ npm run build 通过
+
+### 11. 发现页七大优化（Phase 1-5）
+
+**文件**：
+- `supabase/migrations/20260306400000_feed_stagger.sql`（新建）
+- `supabase/migrations/20260306400001_feed_normalization.sql`（新建）
+- `supabase/migrations/20260306400002_feed_categories.sql`（新建）
+- `supabase/migrations/20260306500000_feed_dedup.sql`（新建）
+- `supabase/migrations/20260306600000_feed_interactions.sql`（新建）
+- `supabase/migrations/20260306700000_feed_translations.sql`（新建）
+- `supabase/functions/fetch-aggregated-feed/index.ts`（修改）
+- `supabase/functions/translate-feed-items/index.ts`（新建）
+- `src/hooks/useAggregatedFeed.ts`（重写）
+- `src/hooks/useFeedCategories.ts`（新建）
+- `src/hooks/useFeedInteractions.ts`（新建）
+- `src/hooks/useFeedTranslation.ts`（新建）
+- `src/pages/Feed.tsx`（修改）
+- `src/components/admin/FeedSourcesManager.tsx`（修改）
+
+**Phase 1A — 分批抓取**：
+- feed_sources 新增 batch_group 列，6 组轮转分配
+- Edge Function 支持 `{ batch_group: N }` 参数过滤
+- 尊重 fetch_interval_minutes，跳过刚抓取过的源
+
+**Phase 1B — 内容规范化**：
+- aggregated_feed 新增 normalized_title, content_hash, reading_time_minutes, raw_content
+- normalizeItem() 函数：清洗标题、FNV-1a 哈希、阅读时间估算
+- pg_trgm GIN 索引加速模糊匹配
+
+**Phase 1C — 全品类标签**：
+- feed_categories 表：16 个动态分类（news/tech/ai/science/finance/crypto/politics/sports...）
+- useFeedCategories hook + getCategoryColorClasses 颜色映射
+- Feed.tsx 发现页筛选标签从硬编码改为 DB 动态加载（最多显示前 8 个）
+- FeedSourcesManager 分类下拉改为动态加载
+- **优化**：Feed chunk 从 751KB → 24KB（移除 `import * as LucideIcons`，改用静态 ICON_MAP）
+
+**Phase 2 — 去重与相似新闻聚合**：
+- feed_clusters + feed_cluster_items 表
+- cluster_feed_items() PL/pgSQL 函数：content_hash 精确匹配 + pg_trgm 模糊匹配（similarity > 0.4）
+- deduplicated_feed 视图：每个 cluster 显示评分最高的文章 + similar_count
+- useAggregatedFeed 优先读 deduplicated_feed 视图
+- useSimilarArticles hook + SimilarArticlesSheet 底部面板（"N 篇相似报道"）
+
+**Phase 3 — 性能优化**：
+- useAggregatedFeed 改为 useInfiniteQuery + 游标分页（cursor = published_at）
+- 每页 25 条 + "加载更多" 按钮
+- Feed.tsx 渲染层适配 infinite query 数据结构
+
+**Phase 4 — 互动机制**：
+- feed_item_likes + feed_item_bookmarks 表（RLS: 公开读/本人写）
+- aggregated_feed 新增 like_count, bookmark_count + 自动触发器
+- useFeedItemStatus 批量查询用户点赞/收藏状态
+- useFeedLike / useFeedBookmark 乐观更新
+- DiscoverFeedCard 底部增加 ❤️ + 🔖 按钮
+
+**Phase 5 — i18n 翻译**：
+- feed_translations 表（feed_id + target_lang 唯一约束）
+- translate-feed-items Edge Function（DeepLX 免费 API，批量翻译缓存）
+- useFeedTranslation hook（按需翻译 + 本地缓存）
+- 发现页筛选栏增加翻译切换按钮（Languages 图标）
+
+- ✅ tsc --noEmit 通过
+- ✅ npm run build 通过
+- ✅ 所有迁移已推送到远端
+- ✅ fetch-aggregated-feed + translate-feed-items 已部署
+
+---
+
+### 23. 用户语言偏好 + 新闻语言过滤
+
+**新建文件**：
+- `platform/supabase/migrations/20260306800000_user_preferred_language.sql`（新建）— profiles 表新增 `preferred_language TEXT DEFAULT 'zh'` 列 + 索引
+
+**修改文件**：
+- `platform/src/pages/UserSettings.tsx`（修改）— 新增语言选择器（Globe 图标 + Select 下拉），支持 🇨🇳 中文 / 🇺🇸 English；加载时从 DB 读取 preferred_language 同步到 i18n；保存时双向同步（DB + i18n）
+- `platform/src/hooks/useAggregatedFeed.ts`（修改）— `useAggregatedFeed(category?, language?)` 新增 language 参数；`fetchFeedPage` 使用 `.eq("language", language)` 过滤；HN fallback 仅在 English 或无过滤时触发
+- `platform/src/pages/Feed.tsx`（修改）— 读取 `i18n.language` 作为 contentLang 传入 `useAggregatedFeed` 和 `useFeedTranslation`
+- `platform/public/locales/zh/translation.json`（修改）— 新增 settings.language 等 key
+- `platform/public/locales/en/translation.json`（修改）— 同上英文版
+
+**新增 DB 列**：`profiles.preferred_language`
+
+- ✅ tsc --noEmit 通过
+- ✅ npm run build 通过
+
+---
+
+### 24. Admin 后台管理系统（Shell + 仪表盘 + 迁移现有功能）
+
+**新建文件（11 个）**：
+- `platform/src/components/admin/AdminGuard.tsx`（新建）— Admin 角色校验，React Query 查 user_roles，非 admin 显示拒绝页
+- `platform/src/components/admin/AdminLayout.tsx`（新建）— Shell：固定侧栏(w-64) + 头部 + `<Outlet />`，移动端 Sheet 侧栏
+- `platform/src/components/admin/AdminSidebar.tsx`（新建）— 7 模块层级导航（总览/消息/动态/应用/用户/财务/系统），shadcn Collapsible + ScrollArea，活跃项圆点指示器，"待开发"灰色徽标
+- `platform/src/components/admin/AdminHeader.tsx`（新建）— 面包屑导航（pathname → 中文标签映射）+ 移动端汉堡菜单 + 返回平台按钮
+- `platform/src/components/admin/StatCard.tsx`（新建）— 统计卡片组件（icon + label + monospace 大号数字 + description），hover 效果
+- `platform/src/components/admin/ComingSoon.tsx`（新建）— 待开发占位页（Construction 图标）
+- `platform/src/hooks/useAdminStats.ts`（新建）— 3 个 React Query hooks：useAdminStats（平台统计 count）、useUserGrowth（30 天注册趋势）、useFeedSourceHealth（错误最多的源 top 10）
+- `platform/src/pages/admin/AdminOverview.tsx`（新建）— 仪表盘：4 个 StatCard（用户/帖子/新闻/源）+ Recharts AreaChart 用户增长图 + 新闻源健康面板 + 平台快照面板
+- `platform/src/pages/admin/AdminBanManagement.tsx`（新建）— 从原 Admin.tsx 提取封禁管理功能
+- `platform/src/pages/admin/AdminPlatformSettings.tsx`（新建）— 从原 Admin.tsx 提取 Groq Whisper 配置
+- `platform/src/pages/admin/AdminFeedSources.tsx`（新建）— FeedSourcesManager 包装页
+
+**修改文件（3 个）**：
+- `platform/src/pages/Admin.tsx`（修改）— 简化为 `<Navigate to="/admin/overview" replace />`
+- `platform/src/App.tsx`（修改）— 旧 `/admin` 单路由 → `/admin/*` 嵌套路由（AdminGuard > AdminLayout > 子页面），全部 lazy 加载
+- `platform/src/pages/Me.tsx`（修改）— "平台管理"链接更新为 `/admin/overview`
+
+**新增路由**：
+| 路径 | 页面 |
+|------|------|
+| `/admin` | → 重定向 `/admin/overview` |
+| `/admin/overview` | 仪表盘 |
+| `/admin/content/discover/sources` | 新闻源管理 |
+| `/admin/users/bans` | 封禁管理 |
+| `/admin/system/settings` | 平台设置 |
+| `/admin/*` | 待开发占位页 |
+
+**导航结构（7 模块）**：
+- 📊 总览 → 仪表盘
+- 💬 消息管理 → 对话/群聊（待开发）
+- 📰 动态管理 → 帖子/评论（待开发）+ 新闻源管理 + 分类（待开发）
+- 📱 应用管理 → 应用商店（待开发）
+- 👥 用户管理 → 用户列表（待开发）+ 封禁管理
+- 💰 财务管理 → 收入概览（待开发）
+- ⚙️ 系统设置 → 平台设置 + 管理员账号（待开发）
+
+**设计**：Admin 路由绕过 MainLayout（不显示 5-Tab 底栏），独立 Shell 布局
+
+- ✅ tsc --noEmit 通过
+- ✅ npm run build 通过
+- ✅ ESLint 无新增错误
+
+---
+
+### 25. 新闻管理后台完善（6 大模块）
+
+**新建文件（18 个）**：
+
+**数据库迁移**：
+- `platform/supabase/migrations/20260307000000_feed_article_moderation.sql`（新建）— aggregated_feed 新增 status/comment_count 列 + admin RLS；创建 feed_item_reports 表（举报系统）；创建 feed_item_comments 表（评论系统）+ comment_count 自动触发器
+
+**页面（5 个）**：
+- `platform/src/pages/admin/AdminFeedDashboard.tsx`（新建）— 新闻数据看板页
+- `platform/src/pages/admin/AdminFeedArticles.tsx`（新建）— 文章管理页
+- `platform/src/pages/admin/AdminFeedCategories.tsx`（新建）— 分类管理页
+- `platform/src/pages/admin/AdminFeedReports.tsx`（新建）— 举报审核页
+- `platform/src/pages/admin/AdminFeedInteractions.tsx`（新建）— 互动管理页
+
+**组件（4 个）**：
+- `platform/src/components/admin/FeedCategoriesManager.tsx`（新建）— 分类 CRUD：排序上下移、icon/color 选择器、active 开关
+- `platform/src/components/admin/FeedArticlesManager.tsx`（新建）— 文章管理：多维筛选 + Table + 分页 + 详情/编辑 Dialog + 批量操作
+- `platform/src/components/admin/FeedReportQueue.tsx`（新建）— 举报审核队列：统计卡、Tab 过滤、处理操作（批准/隐藏/驳回）
+- `platform/src/components/admin/FeedInteractionsManager.tsx`（新建）— 互动管理：评论列表 + 点赞统计 + 收藏统计三 Tab
+- `platform/src/components/admin/FeedDashboardCharts.tsx`（新建）— 数据看板：4 统计卡 + 文章趋势 AreaChart + 分类/来源 BarChart + Top 10 文章
+
+**Hooks（4 个）**：
+- `platform/src/hooks/useAdminFeedArticles.ts`（新建）— 分页查询 + 多维过滤 + 来源列表
+- `platform/src/hooks/useAdminFeedReports.ts`（新建）— 举报列表/统计/处理 mutation
+- `platform/src/hooks/useAdminFeedComments.ts`（新建）— 评论分页 + 软删除 + 点赞/收藏排行
+- `platform/src/hooks/useAdminFeedAnalytics.ts`（新建）— 看板统计 + 30 天趋势 + 分类/来源分布 + Top 文章
+
+**修改文件（4 个）**：
+- `platform/src/App.tsx`（修改）— 新增 5 个 lazy import + 5 个 admin 子路由
+- `platform/src/components/admin/AdminSidebar.tsx`（修改）— 动态管理新增 5 个子导航（新闻概览/文章管理/分类管理/举报审核/互动管理），移除分类的 comingSoon 标记
+- `platform/src/components/admin/AdminHeader.tsx`（修改）— 新增 4 个 segment label（articles/reports/interactions/dashboard）
+- `platform/src/components/admin/FeedSourcesManager.tsx`（修改）— 新增语言过滤栏（全部/中文/English）、抓取设置面板（批量启用/禁用/重置错误）、错误 Tooltip 完整展示、单源重试按钮
+
+**新增 DB 表**：`feed_item_reports`、`feed_item_comments`
+**新增 DB 列**：`aggregated_feed.status`、`aggregated_feed.comment_count`
+
+**6 大功能模块**：
+1. 新闻源管理增强 — 语言过滤 + 抓取设置面板 + 错误优化
+2. 分类管理 — CRUD + 排序 + icon/color 选择器
+3. 文章管理 — 搜索/筛选 + Table + 分页 + 详情/编辑 + 批量操作
+4. 举报审核 — 统计卡 + 队列 + 批准/隐藏/驳回 + 处理备注
+5. 互动管理 — 评论管理 + 点赞统计 + 收藏统计
+6. 数据看板 — 统计概览 + Recharts 图表 + Top 10
+
+**新增路由**：
+| 路径 | 页面 |
+|------|------|
+| `/admin/content/discover/dashboard` | 新闻概览 |
+| `/admin/content/discover/articles` | 文章管理 |
+| `/admin/content/discover/categories` | 分类管理 |
+| `/admin/content/discover/reports` | 举报审核 |
+| `/admin/content/discover/interactions` | 互动管理 |
+
+- ✅ tsc --noEmit 通过
+- ✅ npm run build 通过
+
+### 18. 平台语言管理系统 + zh → zh-CN/zh-TW 迁移
+
+**新建的文件**：
+- `platform/supabase/migrations/20260307200000_platform_languages.sql`（新建）— platform_languages 表 + RLS + zh/en 种子
+- `platform/supabase/migrations/20260307200001_seed_all_languages.sql`（新建）— 预置 16 种额外语言
+- `platform/supabase/migrations/20260307200002_refine_languages.sql`（新建）— 精简为 13 种语言，zh 拆分为 zh-CN/zh-TW，迁移旧数据
+- `platform/src/hooks/usePlatformLanguages.ts`（新建）— 6 个 React Query hooks（查询/开关/排序/增删）
+- `platform/src/components/admin/LanguageManager.tsx`（新建）— 后台语言管理组件（开关 + 排序）
+- `platform/public/locales/zh-CN/translation.json`（新建）— 简体中文翻译
+- `platform/public/locales/zh-TW/translation.json`（新建）— 繁体中文翻译
+
+**修改的文件**：
+- `platform/src/pages/admin/AdminPlatformSettings.tsx`（修改）— 集成 LanguageManager 组件
+- `platform/src/pages/UserSettings.tsx`（修改）— 删除硬编码 LANGUAGE_OPTIONS，改用 useEnabledLanguages()，默认语言 zh → zh-CN
+- `platform/src/components/LanguageSwitcher.tsx`（修改）— 改用 useEnabledLanguages() 动态数据
+- `platform/src/components/admin/FeedSourcesManager.tsx`（修改）— 语言过滤/显示改用 usePlatformLanguages()，默认 zh → zh-CN
+- `platform/src/components/admin/FeedArticlesManager.tsx`（修改）— 语言过滤/显示改用 usePlatformLanguages()，移除硬编码 LANGUAGE_OPTIONS
+- `platform/src/hooks/useFeedTranslation.ts`（修改）— 默认 targetLang zh → zh-CN
+- `platform/src/pages/Feed.tsx`（修改）— contentLang 映射 zh → zh-CN
+- `platform/src/lib/i18n.ts`（修改）— fallbackLng/supportedLngs 增加 zh-CN, zh-TW
+
+**语言列表**（13 种，3 种默认启用）：
+- zh-CN 简体中文 / zh-TW 繁體中文 / en English（启用）
+- ja / ko / es / fr / de / pt / ru / ar / vi / th（禁用）
+
+- ✅ tsc --noEmit 通过
+- ✅ npm run build 通过
+- ✅ 数据库迁移已推送
+
+### 19. 多语言 RSS 源批量导入（112 个新源）
+
+**新建的文件**：
+- `platform/supabase/migrations/20260307300000_multilingual_feeds.sql`（新建）— 12 种语言 112 个 RSS 源
+
+**数据来源**：
+- [awesome-rss-feeds](https://github.com/plenaryapp/awesome-rss-feeds) — 按国家分类的 RSS 合集
+- [BBC World Service](https://github.com/bbc/world-service-rss) — BBC 多语言 RSS
+- 各国主流媒体官方 RSS
+
+**各语言源数**：
+| 语言 | 数量 | 代表来源 |
+|------|------|----------|
+| zh-CN 简体 | 13 | BBC中文、新华网、澎湃、财新、36氪、知乎、虎嗅 |
+| zh-TW 繁體 | 14 | BBC繁體、中央社(5)、聯合、自由、ETtoday、關鍵評論網 |
+| ja 日本語 | 10 | BBC Japanese、NHK(5)、Nikkei、ITmedia |
+| ko 한국어 | 9 | BBC Korean、朝鮮、中央、韓聯、SBS、東亞 |
+| es Español | 10 | BBC Mundo、EL PAÍS、Infobae、France24 ES、DW ES |
+| fr Français | 9 | Le Monde、France24、Franceinfo、RFI、La Presse |
+| de Deutsch | 8 | ZEIT、FAZ、Spiegel、Heise、Golem、Handelsblatt |
+| pt Português | 8 | BBC Brasil、Folha、R7、UOL、Público、Observador |
+| ru Русский | 8 | BBC Russian、ТАСС、Lenta、РИА、Хабр |
+| ar العربية | 8 | BBC Arabic、Al Jazeera、Al Arabiya、Asharq Al-Awsat |
+| vi Tiếng Việt | 9 | BBC Vietnamese、VnExpress(5)、Thanh Niên |
+| th ไทย | 6 | BBC Thai、Bangkok Post(3)、Nation Thailand |
+
+**总计**：原 86 源 + 新增 112 源 ≈ 198 个 RSS 源
+- ✅ 数据库迁移已推送
+
+### 20. RSS 全文提取 + 图片本地化（Strategy B）
+
+**文件**：
+- `platform/supabase/migrations/20260307400000_full_content_extraction.sql`（新建）
+- `platform/supabase/functions/extract-full-article/index.ts`（新建）
+- `platform/supabase/functions/fetch-aggregated-feed/index.ts`（修改：截断 500→2000）
+- `platform/src/hooks/useAggregatedFeed.ts`（修改：新增 full_content 等字段类型）
+- `platform/src/hooks/useAdminFeedArticles.ts`（修改：新增提取字段类型）
+- `platform/src/pages/Feed.tsx`（修改：全文渲染 + 视频嵌入 + HTML 净化）
+- `platform/src/components/admin/FeedArticlesManager.tsx`（修改：提取状态列 + 重提取按钮）
+- `platform/tailwind.config.ts`（修改：添加 @tailwindcss/typography 插件）
+
+**功能**：
+- 数据库: aggregated_feed 新增 full_content, full_content_status, images, videos, word_count 等列
+- 数据库: 新建 feed_media 表追踪已下载图片
+- 数据库: 新建 feed-media Storage bucket（公开读）
+- Edge Function `extract-full-article`: 使用 @extractus/article-extractor 提取全文 HTML
+- 图片下载到 Supabase Storage 并替换 HTML 中的 URL
+- 视频嵌入链接提取（YouTube/Vimeo/MP4）
+- 前端: FeedDetailPanel 支持全文 HTML 渲染（prose 排版 + HTML 净化）
+- 前端: 视频嵌入组件（YouTube iframe / MP4 video）
+- Admin: 文章列表新增「提取」状态列（待提取/已提取/失败/跳过）
+- Admin: 「全文提取」批量触发按钮 + 单篇重新提取按钮
+- Admin: 文章详情展示提取状态、字数、错误信息
+
+- ✅ tsc --noEmit 通过
+- ✅ npm run build 通过
+- ✅ 数据库迁移已推送
+- ✅ Edge Function 已部署（extract-full-article + fetch-aggregated-feed）
+
+---
+
+### 21. 文章管理 UI 修复 + 站内查看链接
+
+**文件**：
+- `platform/src/components/admin/FeedArticlesManager.tsx`（修改）
+- `platform/src/pages/Feed.tsx`（修改）
+
+- 顶部操作栏文字换行修复：添加 `whitespace-nowrap`、`flex-shrink-0`、`gap-3`
+- 文章详情弹窗「原文链接」右侧新增「站内查看」按钮：点击关闭弹窗 + 跳转 `/feed?article={id}`
+- Feed 发现页读取 `?article=ID` query param，自动从 Supabase 查询该文章并弹出详情面板
+- 导入 `useNavigate`、`useSearchParams`、`supabase` 客户端
+
+---
+
+### 22. 新闻源管理三项改进（Switch + 单源抓取 + 进度可视化）
+
+**文件**：
+- `platform/supabase/migrations/20260307500000_feed_sources_improvements.sql`（新建）
+- `platform/supabase/functions/fetch-aggregated-feed/index.ts`（修改）
+- `platform/src/components/admin/FeedSourcesManager.tsx`（完全重写）
+
+**数据库**：
+- `feed_sources` 新增 `total_item_count INT DEFAULT 0`（累计抓取数，不覆盖）
+
+**Edge Function**：
+- 新增 `source_id` 参数：单源定向抓取
+- 新增 `force` 参数：跳过间隔检查
+- 并发改为串行：`CONCURRENCY = 1`（原 5）
+- `total_item_count` 累加（原 `item_count` 每次覆盖）
+
+**FeedSourcesManager 重写**：
+- is_active 切换改用 `<Switch>` 组件（替代圆形 toggle 按钮）
+- 每个源右侧新增绿色「立即抓取」按钮（`RefreshCw`），带单源 loading 状态
+- 源卡片信息行新增：累计抓取数（`total_item_count`）、下次抓取倒计时（`getNextFetchIn`）
+- 全量抓取期间 2s 轮询，进度条实时更新（`completedCount / total`）
+- 进度文字：「X / N 个源已完成（串行队列）」+ 「当前: [源名]」
+
+- ✅ tsc --noEmit 通过
+- ✅ npm run build 通过
+- ✅ 数据库迁移已推送
+- ✅ Edge Function 已重新部署
+
+### 23. 自动全文提取 + 文章图片质量优化
+
+**文件**：
+- `.github/workflows/scheduled-feed-fetch.yml`（修改）
+- `platform/src/pages/Feed.tsx`（修改）
+
+**根本问题**：`extract-full-article` Edge Function 存在但从未自动触发，所有文章永远停在 `full_content_status = 'pending'`，用户只能看到 2-3 句 RSS 摘要。
+
+**GitHub Actions 自动化**：
+- 现有 workflow 每批次 fetch 结束后自动追加「Trigger article extraction」步骤
+- 调用 `extract-full-article` 处理 10 篇 pending 文章（best-effort，失败不影响 feed fetch）
+- 新增 `skip_extraction` 手动触发参数，可跳过提取步骤
+
+**Feed.tsx 图片质量优化**：
+- 解析文章 `images[]` JSONB 字段（提取后存储在 Supabase Storage，高清）
+- `heroImage` 优先使用 `images[0].url`（Supabase Storage），fallback 到 RSS thumbnail
+- 图片加载失败时自动降级：Supabase 图片 → RSS thumbnail → 隐藏
+- hero 图片高度从 `max-h-[300px]` 扩展到 `max-h-[360px]`
+- 全文提取中（pending）：正文下显示「正在提取全文」提示 + 「阅读原文」链接
+- 提取失败（failed）：显示「无法提取全文」提示 + 「阅读原文」链接
+
+- ✅ tsc --noEmit 通过
+- ✅ npm run build 通过
+- ⚠️ 需部署 extract-full-article Edge Function（若尚未部署）
+
+### 22. Jina Reader 全文提取 + 修复抓取 0 条内容
+
+**文件**：`platform/supabase/functions/extract-full-article/index.ts`（重写）、`platform/src/pages/Feed.tsx`（修改）、`platform/src/components/admin/FeedSourcesManager.tsx`（修改）、`.github/workflows/scheduled-feed-fetch.yml`（修改）
+
+**全文提取引擎升级（Jina Reader）**：
+- 移除无效的 `@extractus/article-extractor`（被 Cloudflare/paywall 拦截），改用 Jina Reader API（`r.jina.ai`）
+- 调用 `https://r.jina.ai/{url}` 获取 Markdown 全文，`marked` 库转 HTML
+- 自动下载文章图片并上传至 Supabase Storage（最多 10 张，最大 5MB/张）
+- 提取视频嵌入（YouTube / Vimeo）
+- 响应内容 <200 字符视为 paywall/封锁，标记 `failed`
+- 部署命令：`supabase functions deploy extract-full-article --no-verify-jwt`（新项目使用 `sb_publishable_*` key，非 JWT 格式）
+
+**Feed.tsx 用户体验改进**：
+- 移除 pending/failed 提取状态提示（用户侧不应看到"正在提取全文"状态）
+- `stripHtml` 增强：清理 `&zwnj;` 等零宽字符实体和所有 HTML 实体编码
+
+**FeedSourcesManager.tsx 修复**：
+- 全量抓取（"立即抓取"）默认传 `force: true`，避免因间隔检查跳过近期已抓取的源导致"共获取 0 条内容"
+
+**已验证**：
+- ✅ 澎湃新闻：11,000 字符全文提取成功
+- ✅ 한겨레（韩国）：5,310 词 + 10 张图片提取并上传 Supabase Storage
+- ⚠️ Bangkok Post：付费墙，Jina 无法穿透，建议在管理后台停用
+- ⚠️ Reuters：Jina 服务器地理封锁，返回 451
+
+**GitHub Actions 自动化**：
+- `scheduled-feed-fetch.yml` 已在每次 feed 抓取后自动触发 `extract-full-article`（非致命，失败输出 warning）
+- 需要在 GitHub Secrets 中配置：`SUPABASE_URL`、`SUPABASE_ANON_KEY`
+
+### 23. 新闻管道重构：GDELT + fundus + trafilatura（废弃 RSS）
+
+**文件**：`scripts/fetch_news.py`（新建）、`scripts/requirements.txt`（新建）、`.github/workflows/gdelt-fundus-fetch.yml`（新建）、`.github/workflows/scheduled-feed-fetch.yml`（废弃 cron）
+
+**架构变更**：彻底放弃 RSS 抓取 + Jina Reader，改用三层管道：
+
+| 组件 | 角色 | 特点 |
+|------|------|------|
+| **fundus** | 主力：直接爬取 171 个主流媒体 | 97.69% F1，手写解析器，2026 年仍在维护，MIT |
+| **GDELT** | 补充：免费新闻索引，100+ 语言 | 无需注册，每 15 分钟更新，含 socialimage（OG 图） |
+| **trafilatura** | 全文提取 GDELT 返回的 URL | 比 Jina Reader 更稳定，不依赖第三方服务 |
+
+- GitHub Actions 每小时自动运行（替代原 RSS 分批次 cron）
+- Supabase schema 不变，fundus 文章直接写入 `full_content_status = 'fetched'`
+- `scheduled-feed-fetch.yml` cron 触发已移除（仅保留 workflow_dispatch 手动备用）
+
+**需要配置的 GitHub Secrets**：
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`（service role key，不是 anon key）
