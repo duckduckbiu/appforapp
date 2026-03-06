@@ -351,24 +351,6 @@ def fetch_gdelt(db) -> int:
             domain = art.get("domain", "unknown")
             source_id = url_hash(url)
 
-            # Quick pre-check: skip if already fetched (avoids expensive trafilatura call)
-            try:
-                existing = (
-                    db.table("aggregated_feed")
-                    .select("id, full_content_status")
-                    .eq("url", url)
-                    .limit(1)
-                    .execute()
-                )
-                if existing.data and existing.data[0].get("full_content_status") == "fetched":
-                    continue
-            except Exception:
-                pass
-
-            # Extract full text
-            extracted = extract_trafilatura(url)
-            body_text = (extracted or {}).get("text", "") or ""
-
             # Parse GDELT date: "20260306T120000Z"
             seen = art.get("seendate", "")
             try:
@@ -381,27 +363,29 @@ def fetch_gdelt(db) -> int:
             lang_raw = art.get("language", lang_code)
             lang = normalize_lang(lang_raw)
 
-            title = art.get("title") or (extracted or {}).get("title")
+            title = art.get("title")
             # GDELT socialimage is the article's open-graph image — often high quality
-            image_url = art.get("socialimage") or (extracted or {}).get("image")
-            author = (extracted or {}).get("author")
+            image_url = art.get("socialimage") or None
 
+            # GDELT path: save metadata only (no trafilatura).
+            # trafilatura on 160 URLs (~5s each) = 800s, far exceeds CI timeout.
+            # fundus provides full content; GDELT covers multilingual discovery.
             row = {
                 "source": domain,
                 "source_id": source_id,
                 "title": title,
-                "content": body_text[:500] if body_text else None,
+                "content": None,
                 "url": url,
                 "image_url": image_url,
-                "author_name": author,
+                "author_name": None,
                 "language": lang,
                 "published_at": pub_date,
                 "fetched_at": datetime.now(timezone.utc).isoformat(),
-                "full_content": text_to_html(body_text) if body_text else None,
-                "full_content_status": "fetched" if len(body_text) > 100 else "failed",
+                "full_content": None,
+                "full_content_status": "pending",
                 "images": [],
                 "videos": [],
-                "word_count": len(body_text.split()) if body_text else 0,
+                "word_count": 0,
                 "score": 0,
                 "tags": tags,
             }
