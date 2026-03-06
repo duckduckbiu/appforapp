@@ -1,35 +1,35 @@
 name: AI Browser Scraper
 
-# Uses browser-use + OpenRouter to visit news websites and extract articles.
-# Sources are managed in admin panel (feed_sources with source_type = 'browser_use').
+# Playwright + trafilatura (no-LLM extraction) + OpenRouter (polish only)
+# LLM cost: ~$0.001 per article (single call for rewriting)
 #
 # Required GitHub Secrets:
 #   SUPABASE_URL              — Supabase project URL
 #   SUPABASE_SERVICE_ROLE_KEY — service role key
-#   OPENROUTER_API_KEY        — OpenRouter API key (sk-or-v1-...)
+#   OPENROUTER_API_KEY        — OpenRouter API key (polish step only)
 
 on:
   schedule:
-    - cron: '0 */2 * * *'   # every 2 hours (browser-use is slower than RSS)
+    - cron: '0 */2 * * *'
   workflow_dispatch:
     inputs:
       max_articles:
-        description: 'Max articles per source (default: 10)'
+        description: 'Max articles per source'
         required: false
         default: '10'
       max_sources:
-        description: 'Max sources per run (default: 20)'
+        description: 'Max sources per run'
         required: false
         default: '20'
       model:
-        description: 'OpenRouter model (google/gemini-2.0-flash-001, anthropic/claude-haiku-4-5, etc.)'
+        description: 'OpenRouter model for polish step'
         required: false
         default: 'google/gemini-2.0-flash-001'
 
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -47,7 +47,7 @@ jobs:
           pip install -r scripts/requirements-browser.txt
           playwright install chromium
 
-      - name: Run AI Browser Scraper
+      - name: Run News Scraper
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
