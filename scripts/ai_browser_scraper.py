@@ -42,6 +42,9 @@ GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "")
 MAX_ARTICLES_PER_SOURCE = int(os.environ.get("MAX_ARTICLES_PER_SOURCE", "10"))
 MAX_SOURCES_PER_RUN = int(os.environ.get("MAX_SOURCES_PER_RUN", "20"))
 
+# Gemini model — use 2.0-flash for higher free-tier quota (1500 RPD vs 20 RPD for 2.5-flash)
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+
 # ── Helpers ──────────────────────────────────────────────────────────
 
 def url_hash(url: str) -> str:
@@ -70,7 +73,7 @@ IMPORTANT:
 - For image URLs, get the full absolute URL (not relative paths)
 - For video URLs, look for embedded YouTube, Vimeo, or other video players
 - If you need to scroll down to see more articles, do so
-- Return results as a JSON array
+- When done, call the done action with the JSON array as output
 
 Return ONLY a JSON array like this (no other text):
 [
@@ -94,6 +97,8 @@ Extract:
 3. All videos embedded in the article (YouTube, Vimeo, or direct video URLs)
 4. The author name
 5. The exact publish date
+
+When done, call the done action with the JSON object as output.
 
 Return ONLY a JSON object (no other text):
 {{
@@ -138,26 +143,40 @@ Return ONLY a JSON object (no other text):
 """
 
 
+def _make_llm():
+    """Create Gemini LLM instance."""
+    from browser_use import ChatGoogle
+    return ChatGoogle(model=GEMINI_MODEL)
+
+
 async def extract_articles_from_site(source_url: str, source_name: str, max_articles: int) -> list[dict]:
     """Use browser-use to visit a news site and extract article list."""
-    from browser_use import Agent, BrowserSession, ChatGoogle
+    from browser_use import Agent, BrowserSession
 
-    llm = ChatGoogle(model="gemini-2.5-flash")
+    llm = _make_llm()
     browser = BrowserSession(headless=True)
 
     try:
         task = EXTRACT_TASK_TEMPLATE.format(url=source_url, max_articles=max_articles)
-        agent = Agent(task=task, llm=llm, browser_session=browser)
+        agent = Agent(task=task, llm=llm, browser_session=browser, max_failures=3)
         history = await agent.run()
 
         # Extract final result text from agent history
         result_text = history.final_result() or ""
         articles = _parse_json_array(result_text)
 
+        # If final_result didn't work, try all extracted content
+        if not articles:
+            for content in history.extracted_content():
+                articles = _parse_json_array(content)
+                if articles:
+                    break
+
         if articles:
             print(f"  [browser-use] {source_name}: found {len(articles)} articles")
         else:
             print(f"  [browser-use] {source_name}: no articles extracted")
+            print(f"  [debug] final_result: {result_text[:200] if result_text else 'None'}")
 
         return articles
 
@@ -171,18 +190,26 @@ async def extract_articles_from_site(source_url: str, source_name: str, max_arti
 
 async def extract_full_article(article_url: str) -> Optional[dict]:
     """Use browser-use to extract full content of a single article."""
-    from browser_use import Agent, BrowserSession, ChatGoogle
+    from browser_use import Agent, BrowserSession
 
-    llm = ChatGoogle(model="gemini-2.5-flash")
+    llm = _make_llm()
     browser = BrowserSession(headless=True)
 
     try:
         task = EXTRACT_ARTICLE_TASK_TEMPLATE.format(url=article_url)
-        agent = Agent(task=task, llm=llm, browser_session=browser)
+        agent = Agent(task=task, llm=llm, browser_session=browser, max_failures=3)
         history = await agent.run()
 
         result_text = history.final_result() or ""
         article_data = _parse_json_object(result_text)
+
+        # Fallback: try all extracted content
+        if not article_data:
+            for content in history.extracted_content():
+                article_data = _parse_json_object(content)
+                if article_data:
+                    break
+
         return article_data
 
     except Exception as e:
@@ -194,26 +221,37 @@ async def extract_full_article(article_url: str) -> Optional[dict]:
 
 async def polish_article(title: str, content: str) -> Optional[dict]:
     """Use Gemini to rewrite an article for copyright safety."""
-    from browser_use import ChatGoogle
-    llm = ChatGoogle(model="gemini-2.5-flash")
+    llm = _make_llm()
 
     prompt = POLISH_PROMPT_TEMPLATE.format(title=title, content=content[:8000])
 
-    try:
-        response = await llm.ainvoke(prompt)
-        result_text = response.content if hasattr(response, "content") else str(response)
-        polished = _parse_json_object(result_text)
-        return polished
+    for attempt in range(3):
+        try:
+            response = await llm.ainvoke(prompt)
+            result_text = response.content if hasattr(response, "content") else str(response)
+            polished = _parse_json_object(result_text)
+            if polished:
+                return polished
+        except Exception as e:
+            err_str = str(e)
+            if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                wait = (attempt + 1) * 30
+                print(f"    [polish] rate limited, waiting {wait}s (attempt {attempt+1}/3)")
+                await asyncio.sleep(wait)
+            else:
+                print(f"    [polish] error: {e}")
+                return None
 
-    except Exception as e:
-        print(f"    [polish] error: {e}")
-        return None
+    return None
 
 
 # ── JSON parsing helpers ─────────────────────────────────────────────
 
 def _parse_json_array(text: str) -> list[dict]:
     """Extract a JSON array from text that may contain other content."""
+    if not text:
+        return []
+
     # Try direct parse
     try:
         data = json.loads(text)
@@ -237,6 +275,9 @@ def _parse_json_array(text: str) -> list[dict]:
 
 def _parse_json_object(text: str) -> Optional[dict]:
     """Extract a JSON object from text that may contain other content."""
+    if not text:
+        return None
+
     try:
         data = json.loads(text)
         if isinstance(data, dict):
@@ -449,12 +490,15 @@ async def process_source(db, source: dict) -> int:
             "ai_status": ai_status,
             "ai_category": ai_category,
             "ai_summary": ai_summary,
-            "ai_model": "gemini-2.5-flash",
+            "ai_model": GEMINI_MODEL,
             "ai_processed_at": now_iso() if ai_status == "done" else None,
         }
 
         if insert_article(db, row):
             inserted += 1
+
+        # Brief pause between articles to avoid rate limits
+        await asyncio.sleep(2)
 
     update_source_stats(db, source["id"], inserted)
     print(f"  [{source_name}] inserted {inserted} articles")
@@ -465,6 +509,8 @@ async def main() -> None:
     db = create_client(SUPABASE_URL, SUPABASE_KEY)
     t0 = time.time()
     total = 0
+
+    print(f"[config] model={GEMINI_MODEL}, max_articles_per_source={MAX_ARTICLES_PER_SOURCE}")
 
     # Load all active browser_use sources
     sources = get_browser_sources(db)
@@ -482,6 +528,9 @@ async def main() -> None:
             print(f"[error] {source['name']}: {e}")
             traceback.print_exc()
             update_source_stats(db, source["id"], 0, str(e)[:500])
+
+        # Pause between sources to avoid rate limits
+        await asyncio.sleep(5)
 
     elapsed = round(time.time() - t0, 1)
     print(f"\n=== AI Browser Scraper: {total} articles from {len(sources)} sources in {elapsed}s ===")
