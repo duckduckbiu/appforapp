@@ -42,7 +42,8 @@ GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "")
 MAX_ARTICLES_PER_SOURCE = int(os.environ.get("MAX_ARTICLES_PER_SOURCE", "10"))
 MAX_SOURCES_PER_RUN = int(os.environ.get("MAX_SOURCES_PER_RUN", "20"))
 
-# Gemini model — use 2.0-flash for higher free-tier quota (1500 RPD vs 20 RPD for 2.5-flash)
+# Gemini model — configurable via env var
+# Free-tier quotas (RPD): gemini-1.5-flash=1500, gemini-2.0-flash=1500, gemini-2.5-flash=20
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
 
 # ── Helpers ──────────────────────────────────────────────────────────
