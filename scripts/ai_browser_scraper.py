@@ -37,14 +37,13 @@ from supabase import create_client
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
-GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "")
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 
 MAX_ARTICLES_PER_SOURCE = int(os.environ.get("MAX_ARTICLES_PER_SOURCE", "10"))
 MAX_SOURCES_PER_RUN = int(os.environ.get("MAX_SOURCES_PER_RUN", "20"))
 
-# Gemini model — configurable via env var
-# Free-tier quotas (RPD): gemini-1.5-flash=1500, gemini-2.0-flash=1500, gemini-2.5-flash=20
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+# LLM model via OpenRouter — supports any model on openrouter.ai
+LLM_MODEL = os.environ.get("LLM_MODEL", "google/gemini-2.0-flash-001")
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -145,9 +144,13 @@ Return ONLY a JSON object (no other text):
 
 
 def _make_llm():
-    """Create Gemini LLM instance."""
-    from browser_use import ChatGoogle
-    return ChatGoogle(model=GEMINI_MODEL)
+    """Create LLM instance via OpenRouter."""
+    from browser_use import ChatOpenAI
+    return ChatOpenAI(
+        model=LLM_MODEL,
+        base_url="https://openrouter.ai/api/v1",
+        api_key=OPENROUTER_API_KEY,
+    )
 
 
 async def extract_articles_from_site(source_url: str, source_name: str, max_articles: int) -> list[dict]:
@@ -491,7 +494,7 @@ async def process_source(db, source: dict) -> int:
             "ai_status": ai_status,
             "ai_category": ai_category,
             "ai_summary": ai_summary,
-            "ai_model": GEMINI_MODEL,
+            "ai_model": LLM_MODEL,
             "ai_processed_at": now_iso() if ai_status == "done" else None,
         }
 
@@ -511,7 +514,7 @@ async def main() -> None:
     t0 = time.time()
     total = 0
 
-    print(f"[config] model={GEMINI_MODEL}, max_articles_per_source={MAX_ARTICLES_PER_SOURCE}")
+    print(f"[config] model={LLM_MODEL}, max_articles_per_source={MAX_ARTICLES_PER_SOURCE}")
 
     # Load all active browser_use sources
     sources = get_browser_sources(db)
