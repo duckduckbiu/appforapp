@@ -49,46 +49,6 @@ interface FeedPage {
   nextCursor: string | null;
 }
 
-// ── Client-side fallback: HN only (Reddit blocks browser CORS) ──────
-
-async function fetchHNClient(limit = 20): Promise<AggregatedFeedItem[]> {
-  const res = await fetch("https://hacker-news.firebaseio.com/v0/topstories.json");
-  const ids: number[] = await res.json();
-  const topIds = ids.slice(0, limit);
-  const items: AggregatedFeedItem[] = [];
-
-  for (let i = 0; i < topIds.length; i += 10) {
-    const batch = topIds.slice(i, i + 10);
-    const results = await Promise.allSettled(
-      batch.map(async (id) => {
-        const r = await fetch(`https://hacker-news.firebaseio.com/v0/item/${id}.json`);
-        return r.json();
-      })
-    );
-    for (const result of results) {
-      if (result.status !== "fulfilled") continue;
-      const item = result.value;
-      if (!item || item.type !== "story") continue;
-      items.push({
-        id: `hn-${item.id}`,
-        source: "hackernews",
-        source_id: String(item.id),
-        title: item.title || null,
-        content: item.text ? item.text.replace(/<[^>]*>/g, "").slice(0, 500) : null,
-        url: item.url || `https://news.ycombinator.com/item?id=${item.id}`,
-        image_url: null,
-        author_name: item.by || null,
-        score: item.score || 0,
-        tags: ["tech"],
-        language: "en",
-        published_at: item.time ? new Date(item.time * 1000).toISOString() : null,
-        fetched_at: new Date().toISOString(),
-      });
-    }
-  }
-  return items;
-}
-
 // ── DB fetch helper ──────────────────────────────────────────────────
 
 async function fetchFeedPage(
@@ -171,18 +131,7 @@ export function useAggregatedFeed(category?: string, language?: string) {
     queryKey: ["aggregated-feed", category, language],
     queryFn: async ({ pageParam }) => {
       if (isSupabaseConfigured) {
-        const page = await fetchFeedPage(category, pageParam, language);
-        if (page.items.length > 0) return page;
-      }
-
-      // Fallback: HN only (first page only, only for English or no filter)
-      if (!pageParam && (!language || language === "en")) {
-        try {
-          const hnItems = await fetchHNClient(15);
-          return { items: hnItems, nextCursor: null } as FeedPage;
-        } catch (e) {
-          console.warn("[Feed] HN fallback failed:", e);
-        }
+        return await fetchFeedPage(category, pageParam, language);
       }
 
       return { items: [], nextCursor: null } as FeedPage;
