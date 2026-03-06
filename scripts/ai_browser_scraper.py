@@ -258,31 +258,51 @@ async def extract_full_article(article_url: str) -> Optional[dict]:
         print(f"    [fetch] failed to download")
         return None
 
-    # Extract with trafilatura
-    result = trafilatura.extract(
+    # Extract metadata (author, date, title) via JSON output
+    meta_result = trafilatura.extract(
         downloaded,
-        include_images=True,
+        include_images=False,
         include_links=False,
         include_comments=False,
-        include_tables=False,
         output_format="json",
         with_metadata=True,
     )
 
-    if not result:
+    author = None
+    date = None
+    title = None
+    if meta_result:
+        try:
+            meta = json.loads(meta_result)
+            author = meta.get("author")
+            date = meta.get("date")
+            title = meta.get("title")
+        except json.JSONDecodeError:
+            pass
+
+    # Extract article body as HTML (preserves <p>, <h2>, <h3>, <ul>, etc.)
+    html_content = trafilatura.extract(
+        downloaded,
+        include_images=True,
+        include_links=False,
+        include_comments=False,
+        include_tables=True,
+        include_formatting=True,
+        output_format="html",
+    )
+
+    if not html_content:
+        # Fallback: plain text
+        plain = trafilatura.extract(downloaded, include_formatting=True)
+        if plain:
+            # Convert plain text with \n\n to HTML paragraphs
+            html_content = _text_to_html(plain)
+
+    if not html_content:
         print(f"    [extract] trafilatura returned nothing")
         return None
 
-    try:
-        data = json.loads(result)
-    except json.JSONDecodeError:
-        print(f"    [extract] failed to parse trafilatura JSON")
-        return None
-
-    full_text = data.get("text", "")
-    author = data.get("author")
-    date = data.get("date")
-    title = data.get("title")
+    full_text = html_content
 
     # Extract images from the HTML
     images = _extract_images_from_html(downloaded, article_url)
@@ -368,41 +388,93 @@ def _extract_images_from_html(html: str, base_url: str) -> list[str]:
     return images[:10]
 
 
+def _text_to_html(text: str) -> str:
+    """Convert plain text with paragraph breaks to HTML."""
+    if not text:
+        return ""
+    paragraphs = re.split(r'\n{2,}', text.strip())
+    html_parts = []
+    for p in paragraphs:
+        p = p.strip()
+        if not p:
+            continue
+        # Detect headings (lines that are short and look like titles)
+        if len(p) < 80 and not p.endswith(("。", ".", "!", "?", "！", "？")):
+            html_parts.append(f"<h3>{p}</h3>")
+        else:
+            # Preserve single line breaks as <br>
+            p = p.replace("\n", "<br>")
+            html_parts.append(f"<p>{p}</p>")
+    return "\n".join(html_parts)
+
+
 def _extract_videos_from_html(html: str, base_url: str) -> list[str]:
-    """Extract video URLs from HTML (YouTube, Vimeo, direct video)."""
+    """Extract video URLs from HTML — supports international & Chinese platforms."""
     from bs4 import BeautifulSoup
 
     soup = BeautifulSoup(html, "html.parser")
     videos = []
     seen = set()
 
-    # YouTube iframes
+    def _add(url):
+        if url and url not in seen:
+            seen.add(url)
+            videos.append(url)
+
+    # 1. iframe embeds (YouTube, Vimeo, Tencent, Bilibili, Youku, etc.)
+    video_iframe_patterns = [
+        "youtube.com/embed", "youtu.be",
+        "player.vimeo.com",
+        "v.qq.com", "video.qq.com",         # Tencent Video
+        "player.bilibili.com",               # Bilibili
+        "player.youku.com",                  # Youku
+        "open.iqiyi.com",                    # iQiyi
+        "video.sina.com", "video.weibo.com", # Sina/Weibo
+        "dailymotion.com/embed",
+    ]
     for iframe in soup.find_all("iframe"):
         src = iframe.get("src") or iframe.get("data-src") or ""
-        if "youtube.com/embed" in src or "youtu.be" in src:
-            if src not in seen:
-                seen.add(src)
-                videos.append(src)
-        elif "player.vimeo.com" in src:
-            if src not in seen:
-                seen.add(src)
-                videos.append(src)
+        if any(p in src for p in video_iframe_patterns):
+            _add(src if src.startswith("http") else urljoin(base_url, src))
 
-    # Direct video tags
+    # 2. Direct <video> tags
     for video in soup.find_all("video"):
         src = video.get("src") or ""
         if src:
-            full_src = urljoin(base_url, src)
-            if full_src not in seen:
-                seen.add(full_src)
-                videos.append(full_src)
+            _add(urljoin(base_url, src))
         for source in video.find_all("source"):
             src = source.get("src") or ""
             if src:
-                full_src = urljoin(base_url, src)
-                if full_src not in seen:
-                    seen.add(full_src)
-                    videos.append(full_src)
+                _add(urljoin(base_url, src))
+        # data-src for lazy-loaded videos
+        data_src = video.get("data-src") or ""
+        if data_src:
+            _add(urljoin(base_url, data_src))
+
+    # 3. Tencent News specific: look for data-vid, txp-player, etc.
+    for el in soup.find_all(attrs={"data-vid": True}):
+        vid = el["data-vid"]
+        if vid:
+            _add(f"https://v.qq.com/x/page/{vid}.html")
+
+    for el in soup.find_all(class_=re.compile(r"txp|video-player|qq-video", re.I)):
+        data_src = el.get("data-src") or el.get("data-url") or ""
+        if data_src:
+            _add(data_src if data_src.startswith("http") else urljoin(base_url, data_src))
+
+    # 4. Scan script tags and HTML for video URLs (common in Chinese news)
+    video_url_patterns = [
+        r'https?://[^\s"\'<>]+\.mp4(?:\?[^\s"\'<>]*)?',
+        r'https?://v\.qq\.com/[^\s"\'<>]+',
+        r'https?://[^\s"\'<>]*video[^\s"\'<>]*\.m3u8[^\s"\'<>]*',
+    ]
+    html_text = str(soup)
+    for pattern in video_url_patterns:
+        for match in re.finditer(pattern, html_text):
+            url = match.group()
+            # Skip tracking/analytics URLs
+            if "beacon" not in url and "log" not in url and "track" not in url:
+                _add(url)
 
     return videos[:5]
 
@@ -414,10 +486,15 @@ POLISH_PROMPT_TEMPLATE = """You are a professional news editor. Rewrite the foll
 1. KEEPING all factual information accurate and complete
 2. CHANGING the wording, sentence structure, and expression style
 3. MAINTAINING the same tone and reading experience
-4. PRESERVING the article's structure (paragraphs, key points)
-5. Using the SAME language as the original (if Chinese, write in Chinese; if German, write in German, etc.)
-6. Making it read naturally and professionally
-7. The rewritten article should be roughly the same length as the original
+4. Using the SAME language as the original (Chinese→Chinese, German→German, etc.)
+5. Making it read naturally and professionally
+6. The rewritten article should be roughly the same length as the original
+7. OUTPUT FORMAT: Use HTML tags for structure:
+   - Wrap each paragraph in <p>...</p>
+   - Use <h3>...</h3> for subheadings (add 2-3 subheadings to break up long articles)
+   - Use <strong>...</strong> for key terms or emphasis
+   - Use <blockquote>...</blockquote> for direct quotes
+   - Do NOT include <html>, <body>, or <head> tags — just the article body HTML
 
 Also provide:
 - A rewritten title (same facts, different wording)
@@ -429,8 +506,8 @@ Original Title: {title}
 Original Article:
 {content}
 
-Return ONLY a JSON object:
-{{"polished_title": "...", "polished_content": "...", "summary": "...", "category": "..."}}
+Return ONLY a JSON object (polished_content must be valid HTML with <p>, <h3>, etc.):
+{{"polished_title": "...", "polished_content": "<h3>...</h3><p>...</p><p>...</p>...", "summary": "...", "category": "..."}}
 """
 
 
