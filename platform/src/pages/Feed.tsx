@@ -236,12 +236,14 @@ function FeedDetailPanel({
   translatedContent?: string | null;
 }) {
   const categoryLabel = getCategoryLabel(item.tags, categoriesMap);
-  const displayTitle = translatedTitle || item.title;
+  // Priority: translated > AI polished > original
+  const displayTitle = translatedTitle || (item.ai_status === "done" && item.polished_title ? item.polished_title : item.title);
 
-  // Use full_content if available, fallback to content
+  // Use polished_content if available, then full_content, then content
+  const hasPolished = item.ai_status === "done" && item.polished_content;
   const hasFullContent = item.full_content_status === "fetched" && item.full_content;
-  const rawContent = translatedContent || (hasFullContent ? item.full_content : item.content) || "";
-  const displayContent = hasFullContent ? rawContent : stripHtml(rawContent);
+  const rawContent = translatedContent || (hasPolished ? item.polished_content : hasFullContent ? item.full_content : item.content) || "";
+  const displayContent = (hasPolished || hasFullContent) ? rawContent : stripHtml(rawContent);
 
   // Parse images array (may be JSON string or array)
   const extractedImages: FeedImageInfo[] = useMemo(() => {
@@ -529,17 +531,17 @@ function DiscoverFeedCard({
               </span>
             </div>
 
-            {/* Title (use translated if available) */}
-            {(translatedTitle || item.title) && (
+            {/* Title: translated > polished > original */}
+            {(translatedTitle || item.polished_title || item.title) && (
               <h3 className="text-[15px] font-semibold leading-snug line-clamp-2 text-foreground group-hover:text-primary transition-colors">
-                {translatedTitle || item.title}
+                {translatedTitle || (item.ai_status === "done" && item.polished_title ? item.polished_title : item.title)}
               </h3>
             )}
 
-            {/* Content summary */}
-            {(translatedContent || item.content) && !hasImage && (
+            {/* Content summary: translated > ai_summary > content */}
+            {(translatedContent || item.ai_summary || item.content) && !hasImage && (
               <p className="text-[13px] text-muted-foreground line-clamp-2 leading-relaxed mt-1">
-                {stripHtml(translatedContent || item.content || "")}
+                {stripHtml(translatedContent || (item.ai_status === "done" && item.ai_summary ? item.ai_summary : item.content) || "")}
               </p>
             )}
 

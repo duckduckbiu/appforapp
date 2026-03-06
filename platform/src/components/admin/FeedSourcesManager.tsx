@@ -54,6 +54,7 @@ const SOURCE_TYPES = [
   { value: "rss", label: "RSS" },
   { value: "hackernews", label: "Hacker News" },
   { value: "reddit", label: "Reddit" },
+  { value: "browser_use", label: "AI 浏览器" },
 ];
 
 type TabKey = "all" | "running" | "stopped" | "error";

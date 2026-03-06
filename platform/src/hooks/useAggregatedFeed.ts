@@ -39,6 +39,12 @@ export interface AggregatedFeedItem {
   word_count?: number | null;
   extraction_error?: string | null;
   extracted_at?: string | null;
+  // AI polish fields
+  polished_title?: string | null;
+  polished_content?: string | null;
+  ai_status?: string | null; // 'pending' | 'polishing' | 'done' | 'failed' | 'skipped'
+  ai_category?: string | null;
+  ai_summary?: string | null;
   // Dedup fields (from deduplicated_feed view)
   similar_count?: number;
   cluster_id?: string;

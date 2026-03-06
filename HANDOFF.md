@@ -916,3 +916,32 @@
   3. **GDELT**：查询表（由启用语言动态生成，zh-CN/zh-TW 自动去重，ko 标注暂不支持）
   4. **数据管理**：一键清除 feed_sources 表中 198 条旧 RSS 源（AlertDialog 二次确认）
 - `FeedEnginePanel` 内置 `PLATFORM_TO_GDELT` 常量，与 `scripts/fetch_news.py` 保持同步
+
+### 26. 移除 HN 客户端回退 + 废弃 RSS workflow
+
+**文件**：
+- `platform/src/hooks/useAggregatedFeed.ts`（修改）— 删除 ~50 行 HN Firebase API 回退逻辑，空 DB 现在正确显示空状态
+- `.github/workflows/scheduled-feed-fetch.yml`（删除）— 废弃的 RSS 抓取 workflow
+
+### 27. AI 浏览器新闻提取管道（browser-use + Gemini）
+
+**文件**：
+- `platform/supabase/migrations/20260307700000_ai_browser_scraper.sql`（新建）— aggregated_feed 新增 7 个 AI 字段：polished_title, polished_content, ai_status, ai_category, ai_summary, ai_model, ai_processed_at
+- `scripts/ai_browser_scraper.py`（新建）— browser-use + Gemini 视觉提取脚本，三阶段管道：
+  1. browser-use 打开真实浏览器访问新闻网站，AI 视觉识别文章列表
+  2. 逐个进入文章页，提取全文 + 图片 + 视频
+  3. Gemini 润色改写（保留事实，换表达，规避版权）
+- `scripts/requirements-browser.txt`（新建）— browser-use, langchain-google-genai, supabase, playwright
+- `.github/workflows/ai-browser-scraper.yml`（新建）— 每 2 小时定时触发，安装 Chromium + browser-use，运行 AI 提取
+- `platform/src/components/admin/FeedSourcesManager.tsx`（修改）— SOURCE_TYPES 新增 "AI 浏览器" (browser_use) 选项
+- `platform/src/hooks/useAggregatedFeed.ts`（修改）— AggregatedFeedItem 接口新增 polished_title, polished_content, ai_status, ai_category, ai_summary 字段
+- `platform/src/pages/Feed.tsx`（修改）— FeedDetailPanel 和 DiscoverFeedCard 优先展示 AI 润色后的标题/内容/摘要
+
+**使用方式**：
+1. 后台 → 新闻源管理 → 添加源 → 类型选 "AI 浏览器" → 填入新闻网站 URL
+2. 按语言 tab 组织管理源（如意大利语 tab 下添加 10 个意大利新闻网址）
+3. GitHub Actions 每 2 小时自动运行，或手动触发
+4. 需要设置 GitHub Secret: GOOGLE_API_KEY（Google AI Studio Gemini 免费额度）
+
+- ✅ tsc --noEmit 通过
+- ✅ npm run build 通过
