@@ -140,16 +140,10 @@ Return ONLY a JSON object (no other text):
 
 async def extract_articles_from_site(source_url: str, source_name: str, max_articles: int) -> list[dict]:
     """Use browser-use to visit a news site and extract article list."""
-    from browser_use import Agent, Browser, BrowserConfig
+    from browser_use import Agent, BrowserSession, BrowserProfile, ChatGoogle
 
-    try:
-        from browser_use import ChatGoogle
-        llm = ChatGoogle(model="gemini-2.5-flash")
-    except ImportError:
-        from langchain_google_genai import ChatGoogleGenerativeAI
-        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=GOOGLE_API_KEY)
-
-    browser = Browser(config=BrowserConfig(headless=True))
+    llm = ChatGoogle(model="gemini-2.5-flash")
+    browser = BrowserSession(BrowserProfile(headless=True))
 
     try:
         task = EXTRACT_TASK_TEMPLATE.format(url=source_url, max_articles=max_articles)
@@ -177,16 +171,10 @@ async def extract_articles_from_site(source_url: str, source_name: str, max_arti
 
 async def extract_full_article(article_url: str) -> Optional[dict]:
     """Use browser-use to extract full content of a single article."""
-    from browser_use import Agent, Browser, BrowserConfig
+    from browser_use import Agent, BrowserSession, BrowserProfile, ChatGoogle
 
-    try:
-        from browser_use import ChatGoogle
-        llm = ChatGoogle(model="gemini-2.5-flash")
-    except ImportError:
-        from langchain_google_genai import ChatGoogleGenerativeAI
-        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=GOOGLE_API_KEY)
-
-    browser = Browser(config=BrowserConfig(headless=True))
+    llm = ChatGoogle(model="gemini-2.5-flash")
+    browser = BrowserSession(BrowserProfile(headless=True))
 
     try:
         task = EXTRACT_ARTICLE_TASK_TEMPLATE.format(url=article_url)
@@ -206,12 +194,8 @@ async def extract_full_article(article_url: str) -> Optional[dict]:
 
 async def polish_article(title: str, content: str) -> Optional[dict]:
     """Use Gemini to rewrite an article for copyright safety."""
-    try:
-        from browser_use import ChatGoogle
-        llm = ChatGoogle(model="gemini-2.5-flash")
-    except ImportError:
-        from langchain_google_genai import ChatGoogleGenerativeAI
-        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=GOOGLE_API_KEY)
+    from browser_use import ChatGoogle
+    llm = ChatGoogle(model="gemini-2.5-flash")
 
     prompt = POLISH_PROMPT_TEMPLATE.format(title=title, content=content[:8000])
 
