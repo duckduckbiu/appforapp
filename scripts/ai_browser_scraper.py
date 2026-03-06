@@ -311,10 +311,10 @@ async def extract_full_article(article_url: str) -> Optional[dict]:
 
     full_text = html_content
 
-    # Extract images from the HTML
-    images = _extract_images_from_html(downloaded, article_url)
+    # Extract images from trafilatura's article HTML (NOT full page — avoids QR codes, ads, etc.)
+    images = _extract_images_from_article_html(html_content, article_url)
 
-    # Extract video embeds from the HTML
+    # Extract video embeds from the full page HTML (videos may be outside trafilatura's scope)
     videos = _extract_videos_from_html(downloaded, article_url)
 
     return {
@@ -349,45 +349,48 @@ async def _fetch_with_playwright(url: str) -> Optional[str]:
         return None
 
 
-def _extract_images_from_html(html: str, base_url: str) -> list[str]:
-    """Extract article images from HTML."""
+def _extract_images_from_article_html(article_html: str, base_url: str) -> list[str]:
+    """
+    Extract images from trafilatura's article-only HTML output.
+    This avoids grabbing QR codes, ads, navigation images, etc.
+    since trafilatura already filtered to article content.
+    """
     from bs4 import BeautifulSoup
 
-    soup = BeautifulSoup(html, "html.parser")
+    soup = BeautifulSoup(article_html, "html.parser")
     images = []
     seen = set()
 
-    # Find images in article-like containers
-    for container_tag in ["article", "main", "[role='main']", ".article-body", ".post-content", ".story-body"]:
-        container = soup.select_one(container_tag) if container_tag.startswith(("[", ".")) else soup.find(container_tag)
-        if container:
-            for img in container.find_all("img"):
-                src = img.get("src") or img.get("data-src") or img.get("data-lazy-src") or ""
-                if not src:
-                    continue
-                full_src = urljoin(base_url, src)
-                # Skip tiny images (likely icons/trackers)
-                width = img.get("width", "")
-                height = img.get("height", "")
-                if (width and width.isdigit() and int(width) < 100) or (height and height.isdigit() and int(height) < 100):
-                    continue
-                if full_src not in seen:
-                    seen.add(full_src)
-                    images.append(full_src)
-            if images:
-                return images[:10]
+    # Junk image patterns to filter out
+    junk_patterns = [
+        "qr", "qrcode", "二维码", "weixin", "wechat",
+        "logo", "icon", "avatar", "emoji", "badge",
+        "pixel", "tracker", "beacon", "analytics",
+        "advertisement", "ad_", "ad-", "ads/", "adsense",
+        "share", "social", "button", "btn",
+        "spinner", "loading", "placeholder",
+        "data:image",  # inline data URIs
+    ]
 
-    # Fallback: all images that look substantial
     for img in soup.find_all("img"):
-        src = img.get("src") or img.get("data-src") or ""
+        src = img.get("src") or img.get("data-src") or img.get("data-lazy-src") or ""
         if not src:
             continue
+
         full_src = urljoin(base_url, src)
-        # Skip data URIs, tracking pixels, tiny icons
-        if full_src.startswith("data:") or "pixel" in full_src or "tracker" in full_src:
+        src_lower = full_src.lower()
+
+        # Skip junk images
+        if any(p in src_lower for p in junk_patterns):
             continue
-        if "logo" in full_src.lower() or "icon" in full_src.lower() or "avatar" in full_src.lower():
+
+        # Skip tiny images (icons, trackers)
+        width = img.get("width", "")
+        height = img.get("height", "")
+        if (width and width.isdigit() and int(width) < 100) or \
+           (height and height.isdigit() and int(height) < 100):
             continue
+
         if full_src not in seen:
             seen.add(full_src)
             images.append(full_src)
