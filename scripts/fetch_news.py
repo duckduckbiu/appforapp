@@ -24,6 +24,7 @@ import time
 from datetime import datetime, timezone
 from typing import Optional
 
+import markdown as md_lib
 import requests
 import trafilatura
 from supabase import create_client
@@ -102,37 +103,57 @@ def normalize_lang(code: str) -> str:
 
 
 def text_to_html(text: str) -> str:
-    """Convert plain text (newline-separated paragraphs) to basic HTML."""
-    paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
-    if not paragraphs:
-        return f"<p>{text.strip()}</p>" if text.strip() else ""
-    return "\n".join(f"<p>{p}</p>" for p in paragraphs)
+    """
+    Convert Markdown/plain text to HTML.
+    Handles: paragraphs, headings, bold/italic, links [text](url),
+    images ![alt](url), and lists.
+    """
+    if not text.strip():
+        return ""
+    return md_lib.markdown(
+        text,
+        extensions=["nl2br", "sane_lists"],
+    )
 
 
-def already_exists(db, source: str, source_id: str) -> bool:
+def upsert_article(db, row: dict) -> str:
+    """
+    Insert article or upgrade existing one:
+    - If URL already in DB with full content → skip
+    - If URL already in DB but missing full content → UPDATE with new content
+    - If URL not in DB → INSERT
+    Returns: "inserted" | "updated" | "skipped" | "error"
+    """
     try:
-        res = (
+        existing = (
             db.table("aggregated_feed")
-            .select("id")
-            .eq("source", source)
-            .eq("source_id", source_id)
+            .select("id, full_content_status")
+            .eq("url", row["url"])
             .limit(1)
             .execute()
         )
-        return bool(res.data)
-    except Exception:
-        return False
-
-
-def insert_article(db, row: dict) -> bool:
-    try:
-        db.table("aggregated_feed").upsert(
-            row, on_conflict="source,source_id"
-        ).execute()
-        return True
+        if existing.data:
+            ex = existing.data[0]
+            if ex.get("full_content_status") == "fetched":
+                return "skipped"
+            # Upgrade: fill in the missing full content
+            db.table("aggregated_feed").update({
+                "full_content": row["full_content"],
+                "full_content_status": row["full_content_status"],
+                "images": row["images"],
+                "videos": row["videos"],
+                "word_count": row["word_count"],
+                "image_url": row["image_url"] or ex.get("image_url"),
+            }).eq("id", ex["id"]).execute()
+            return "updated"
+        else:
+            db.table("aggregated_feed").upsert(
+                row, on_conflict="source,source_id"
+            ).execute()
+            return "inserted"
     except Exception as e:
         print(f"    ! DB error: {e}")
-        return False
+        return "error"
 
 
 # ── fundus ───────────────────────────────────────────────────────────
@@ -170,6 +191,7 @@ def fetch_fundus(db) -> int:
     print(f"[fundus] crawling {len(collections)} country collections, max {MAX_FUNDUS_ARTICLES} articles")
     crawler = Crawler(*collections)
     inserted = 0
+    updated = 0
 
     try:
         for article in crawler.crawl(max_articles=MAX_FUNDUS_ARTICLES):
@@ -181,8 +203,6 @@ def fetch_fundus(db) -> int:
                 source_name = str(pub).lower().replace(" ", "_") if pub else "fundus"
 
                 source_id = url_hash(url)
-                if already_exists(db, source_name, source_id):
-                    continue
 
                 # Body text
                 body_text = ""
@@ -237,10 +257,14 @@ def fetch_fundus(db) -> int:
                     "tags": [],
                 }
 
-                if insert_article(db, row):
+                result = upsert_article(db, row)
+                title_short = (row["title"] or url)[:70]
+                if result == "inserted":
                     inserted += 1
-                    title_short = (row["title"] or url)[:70]
                     print(f"  + [{lang}] {title_short}")
+                elif result == "updated":
+                    updated += 1
+                    print(f"  ↑ [{lang}] {title_short}")
 
             except Exception as e:
                 print(f"  [fundus] article error: {e}")
@@ -248,7 +272,8 @@ def fetch_fundus(db) -> int:
     except Exception as e:
         print(f"[fundus] crawler error: {e}")
 
-    return inserted
+    print(f"[fundus] inserted={inserted} updated={updated}")
+    return inserted + updated
 
 
 # ── GDELT ────────────────────────────────────────────────────────────
@@ -310,6 +335,7 @@ def fetch_gdelt(db) -> int:
     then extract full content with trafilatura.
     """
     inserted = 0
+    updated = 0
 
     for query, lang_code, tags in GDELT_QUERIES:
         print(f"  [GDELT] '{query[:45]}' [{lang_code}]")
@@ -367,14 +393,19 @@ def fetch_gdelt(db) -> int:
                 "tags": tags,
             }
 
-            if insert_article(db, row):
+            result = upsert_article(db, row)
+            title_short = (title or url)[:70]
+            if result == "inserted":
                 inserted += 1
-                title_short = (title or url)[:70]
                 print(f"    + [{lang}] {title_short}")
+            elif result == "updated":
+                updated += 1
+                print(f"    ↑ [{lang}] {title_short}")
 
         time.sleep(1)  # be polite to GDELT between queries
 
-    return inserted
+    print(f"[GDELT] inserted={inserted} updated={updated}")
+    return inserted + updated
 
 
 # ── Main ─────────────────────────────────────────────────────────────
