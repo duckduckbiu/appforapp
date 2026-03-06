@@ -302,12 +302,19 @@ async def extract_full_article(article_url: str) -> Optional[dict]:
         print(f"    [extract] trafilatura returned nothing")
         return None
 
-    # Convert trafilatura's <graphic src="..."/> to standard <img> tags
-    html_content = re.sub(
-        r'<graphic\s+src="([^"]+)"\s*/?>',
-        r'<figure><img src="\1" loading="lazy" style="max-width:100%;border-radius:8px;margin:1em 0"/></figure>',
-        html_content,
-    )
+    # Convert trafilatura's <graphic> tags to standard <img> tags
+    # Handles: <graphic src="..."/>, <graphic src="..." alt="..."/>, etc.
+    def _graphic_to_img(m):
+        attrs = m.group(1)
+        src_match = re.search(r'src="([^"]+)"', attrs)
+        alt_match = re.search(r'alt="([^"]*)"', attrs)
+        src = src_match.group(1) if src_match else ""
+        alt = alt_match.group(1) if alt_match else ""
+        if not src:
+            return ""
+        return f'<figure><img src="{src}" alt="{alt}" loading="lazy" style="max-width:100%;border-radius:8px;margin:1em 0"/></figure>'
+
+    html_content = re.sub(r'<graphic\s+([^>]+?)/?>', _graphic_to_img, html_content)
 
     full_text = html_content
 
@@ -504,6 +511,8 @@ POLISH_PROMPT_TEMPLATE = """You are a professional news editor. Rewrite the foll
    - Use <h3>...</h3> for subheadings (add 2-3 subheadings to break up long articles)
    - Use <strong>...</strong> for key terms or emphasis
    - Use <blockquote>...</blockquote> for direct quotes
+   - Keep any <figure><img src="..." .../></figure> tags for images — do NOT remove them
+   - Do NOT use <graphic> tags — use <img> instead
    - Do NOT include <html>, <body>, or <head> tags — just the article body HTML
 
 Also provide:
@@ -516,8 +525,8 @@ Original Title: {title}
 Original Article:
 {content}
 
-Return ONLY a JSON object (polished_content must be valid HTML with <p>, <h3>, etc.):
-{{"polished_title": "...", "polished_content": "<h3>...</h3><p>...</p><p>...</p>...", "summary": "...", "category": "..."}}
+Return ONLY a JSON object (polished_content must be valid HTML with <p>, <h3>, <figure>, <img> etc.):
+{{"polished_title": "...", "polished_content": "<h3>...</h3><p>...</p><figure><img src=\"...\"/></figure><p>...</p>...", "summary": "...", "category": "..."}}
 """
 
 
