@@ -13,7 +13,7 @@ name: News Fetch (GDELT + fundus)
 
 on:
   schedule:
-    - cron: '0 * * * *'   # every hour
+    - cron: '*/10 * * * *'   # every 10 minutes (script skips if interval not due)
   workflow_dispatch:
     inputs:
       source:
@@ -21,9 +21,9 @@ on:
         required: false
         default: 'both'
       max_fundus:
-        description: 'Max articles from fundus (default: 50)'
+        description: 'Max articles from fundus (default: 200)'
         required: false
-        default: '50'
+        default: '200'
       max_gdelt:
         description: 'Max articles per GDELT query (default: 20, metadata only - no trafilatura)'
         required: false
@@ -32,7 +32,7 @@ on:
 jobs:
   fetch-news:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -53,7 +53,7 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SOURCE: ${{ github.event.inputs.source || 'both' }}
-          MAX_FUNDUS_ARTICLES: ${{ github.event.inputs.max_fundus || '50' }}
+          MAX_FUNDUS_ARTICLES: ${{ github.event.inputs.max_fundus || '200' }}
           MAX_GDELT_PER_QUERY: ${{ github.event.inputs.max_gdelt || '20' }}
           PYTHONUNBUFFERED: '1'
         run: |

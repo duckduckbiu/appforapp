@@ -1,5 +1,5 @@
-import { FeedSourcesManager } from "@/components/admin/FeedSourcesManager";
+import { FeedEnginePanel } from "@/components/admin/FeedEnginePanel";
 
 export default function AdminFeedSources() {
-  return <FeedSourcesManager />;
+  return <FeedEnginePanel />;
 }

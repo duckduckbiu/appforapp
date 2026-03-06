@@ -18,6 +18,7 @@ GitHub Actions secrets required:
 """
 
 import hashlib
+import html as html_lib
 import json
 import os
 import time
@@ -42,7 +43,7 @@ MAX_GDELT_PER_QUERY = int(os.environ.get("MAX_GDELT_PER_QUERY", "20"))
 # ISO 639 → 2-letter code used in aggregated_feed.language
 LANG_MAP: dict[str, str] = {
     "English": "en", "eng": "en",
-    "Chinese": "zh", "zho": "zh", "chi": "zh",
+    "Chinese": "zh-CN", "zho": "zh-CN", "chi": "zh-CN",
     "Korean": "ko", "kor": "ko",
     "Japanese": "ja", "jpn": "ja",
     "Spanish": "es", "spa": "es",
@@ -60,26 +61,52 @@ LANG_MAP: dict[str, str] = {
     "Turkish": "tr", "tur": "tr",
 }
 
-# GDELT supplementary queries: (search terms, GDELT lang code, tags for DB)
-# Reduced to 8 queries to stay under rate limits.
-# Korean (kor) removed — GDELT API returns invalid JSON for that lang code.
-GDELT_QUERIES: list[tuple[str, str, list[str]]] = [
-    # English — combine topics to reduce query count
-    ("breaking news world politics government", "eng", ["world", "politics"]),
-    ("technology artificial intelligence economy finance", "eng", ["tech", "finance"]),
-    # Chinese
-    ("科技 人工智能 创新 经济 世界新闻", "zho", ["tech", "world"]),
-    # Japanese
-    ("テクノロジー 世界ニュース 経済", "jpn", ["world", "tech"]),
-    # Spanish
-    ("tecnología política economía mundo", "spa", ["world"]),
-    # French
-    ("politique économie technologie monde", "fra", ["world", "tech"]),
-    # German
-    ("Technologie Wirtschaft Politik Welt", "deu", ["world", "tech"]),
-    # Arabic
-    ("أخبار العالم تكنولوجيا", "ara", ["world", "tech"]),
-]
+# Platform language code → (GDELT search query, GDELT lang code, tags)
+# zh-CN and zh-TW share the same GDELT lang code "zho"; duplicates are deduped at runtime.
+# Korean "kor" is excluded — GDELT API returns invalid JSON for that lang code.
+PLATFORM_TO_GDELT: dict[str, tuple[str, str, list[str]]] = {
+    "en":    ("breaking news world politics technology economy finance", "eng", ["world", "politics", "tech", "finance"]),
+    "zh-CN": ("科技 人工智能 创新 经济 世界新闻", "zho", ["tech", "world"]),
+    "zh-TW": ("科技 人工智能 創新 經濟 世界新聞", "zho", ["tech", "world"]),  # same gdelt code as zh-CN — deduped
+    "ja":    ("テクノロジー 世界ニュース 経済", "jpn", ["world", "tech"]),
+    "ko":    None,  # "kor" returns invalid JSON from GDELT — skipped
+    "es":    ("tecnología política economía mundo", "spa", ["world"]),
+    "fr":    ("politique économie technologie monde", "fra", ["world", "tech"]),
+    "de":    ("Technologie Wirtschaft Politik Welt", "deu", ["world", "tech"]),
+    "pt":    ("tecnologia política economia mundo", "por", ["world"]),
+    "ru":    ("технологии мировые новости экономика", "rus", ["world", "tech"]),
+    "ar":    ("أخبار العالم تكنولوجيا", "ara", ["world", "tech"]),
+    "vi":    ("công nghệ thế giới kinh tế", "vie", ["world"]),
+    "th":    ("เทคโนโลยี ข่าวโลก เศรษฐกิจ", "tha", ["world"]),
+}
+
+
+# ── DB Config Helpers ────────────────────────────────────────────────
+
+def get_settings(db) -> dict[str, str]:
+    """Read all rows from platform_settings. Returns empty dict on error."""
+    try:
+        result = db.table("platform_settings").select("key,value").execute()
+        return {row["key"]: row["value"] for row in result.data or []}
+    except Exception as e:
+        print(f"[settings] read error: {e}")
+        return {}
+
+
+def get_enabled_languages(db) -> list[str]:
+    """Return list of enabled platform language codes. Fallback: ['zh-CN', 'en']."""
+    try:
+        result = (
+            db.table("platform_languages")
+            .select("code")
+            .eq("is_enabled", True)
+            .execute()
+        )
+        codes = [row["code"] for row in result.data or []]
+        return codes if codes else ["zh-CN", "en"]
+    except Exception as e:
+        print(f"[languages] read error: {e}")
+        return ["zh-CN", "en"]
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -105,6 +132,52 @@ def text_to_html(text: str) -> str:
         text,
         extensions=["nl2br", "sane_lists"],
     )
+
+
+def body_to_html(body_obj) -> str:
+    """
+    Generate structured HTML from a fundus ArticleBody object.
+    Preserves heading hierarchy (Subheadline → <h3>), lists, blockquotes.
+    Falls back to empty string on any error; caller should then use text_to_html().
+    """
+    parts: list[str] = []
+    try:
+        for node in body_obj:
+            cls = type(node).__name__
+
+            # Lists: .value is a list of str items
+            if cls in ("OrderedList", "UnorderedList"):
+                tag = "ol" if cls == "OrderedList" else "ul"
+                try:
+                    items = "".join(
+                        f"<li>{html_lib.escape(str(item).strip())}</li>"
+                        for item in node.value
+                        if str(item).strip()
+                    )
+                    if items:
+                        parts.append(f"<{tag}>{items}</{tag}>")
+                except Exception:
+                    text = str(node).strip()
+                    if text:
+                        parts.append(f"<p>{html_lib.escape(text)}</p>")
+                continue
+
+            text = str(node).strip()
+            if not text:
+                continue
+
+            escaped = html_lib.escape(text)
+            if cls == "Subheadline":
+                parts.append(f"<h3>{escaped}</h3>")
+            elif cls == "Summary":
+                parts.append(f"<p><strong>{escaped}</strong></p>")
+            elif cls == "BlockQuote":
+                parts.append(f"<blockquote><p>{escaped}</p></blockquote>")
+            else:  # Paragraph and any unknown types
+                parts.append(f"<p>{escaped}</p>")
+    except Exception:
+        return ""
+    return "\n".join(parts)
 
 
 def upsert_article(db, row: dict) -> str:
@@ -149,11 +222,12 @@ def upsert_article(db, row: dict) -> str:
 
 # ── fundus ───────────────────────────────────────────────────────────
 
-def fetch_fundus(db) -> int:
+def fetch_fundus(db, enabled_langs: list[str]) -> int:
     """
     Crawl major publishers via fundus.
     fundus has hand-written parsers for 171 publishers across 37 countries —
     highest extraction accuracy of any open-source tool (97.69% F1).
+    Only saves articles whose language is in enabled_langs.
     """
     try:
         from fundus import Crawler, PublisherCollection  # type: ignore
@@ -179,7 +253,7 @@ def fetch_fundus(db) -> int:
         print("[fundus] no publisher collections found")
         return 0
 
-    print(f"[fundus] crawling {len(collections)} country collections, max {MAX_FUNDUS_ARTICLES} articles")
+    print(f"[fundus] crawling {len(collections)} country collections, max {MAX_FUNDUS_ARTICLES} articles, langs={enabled_langs}")
     crawler = Crawler(*collections)
     inserted = 0
     updated = 0
@@ -248,9 +322,21 @@ def fetch_fundus(db) -> int:
                 lang_raw = getattr(article, "language", None) or "en"
                 lang = normalize_lang(str(lang_raw))
 
+                # Skip if language not enabled on this platform
+                if lang not in enabled_langs:
+                    continue
+
                 # Published date
                 pub_date_obj = getattr(article, "publishing_date", None)
                 pub_date = pub_date_obj.isoformat() if pub_date_obj else datetime.now(timezone.utc).isoformat()
+
+                # Generate HTML: structured (headings/lists preserved) with markdown fallback
+                html_content: Optional[str] = None
+                if body_obj is not None:
+                    structured = body_to_html(body_obj)
+                    html_content = structured if structured else None
+                if not html_content and body_text:
+                    html_content = text_to_html(body_text)
 
                 row = {
                     "source": source_name,
@@ -263,7 +349,7 @@ def fetch_fundus(db) -> int:
                     "language": lang,
                     "published_at": pub_date,
                     "fetched_at": datetime.now(timezone.utc).isoformat(),
-                    "full_content": text_to_html(body_text) if body_text else None,
+                    "full_content": html_content,
                     "full_content_status": "fetched" if len(body_text) > 100 else "failed",
                     "images": images,
                     "videos": [],
@@ -346,15 +432,30 @@ def extract_trafilatura(url: str) -> Optional[dict]:
         return None
 
 
-def fetch_gdelt(db) -> int:
+def fetch_gdelt(db, enabled_langs: list[str]) -> int:
     """
-    Query GDELT for recent articles across topics and languages,
-    then extract full content with trafilatura.
+    Query GDELT for recent articles across topics and languages.
+    Queries are built dynamically from enabled platform languages.
     """
     inserted = 0
     updated = 0
 
-    for query, lang_code, tags in GDELT_QUERIES:
+    # Build query list from enabled languages; deduplicate by GDELT lang code
+    seen_gdelt_codes: set[str] = set()
+    queries_to_run: list[tuple[str, str, list[str]]] = []
+    for lang_code in enabled_langs:
+        entry = PLATFORM_TO_GDELT.get(lang_code)
+        if not entry:
+            continue
+        query, gdelt_code, tags = entry
+        if gdelt_code in seen_gdelt_codes:
+            continue  # e.g. zh-TW skipped when zh-CN already added (both use "zho")
+        seen_gdelt_codes.add(gdelt_code)
+        queries_to_run.append((query, gdelt_code, tags))
+
+    print(f"[GDELT] {len(queries_to_run)} queries for langs={enabled_langs}")
+
+    for query, lang_code, tags in queries_to_run:
         print(f"  [GDELT] '{query[:45]}' [{lang_code}]")
         articles = query_gdelt(query, lang_code, MAX_GDELT_PER_QUERY)
 
@@ -428,16 +529,49 @@ def main() -> None:
     total = 0
     t0 = time.time()
 
-    if SOURCE_ARG in ("fundus", "both"):
-        print("\n=== fundus: crawling major publishers ===")
-        n = fetch_fundus(db)
-        print(f"fundus: {n} articles inserted\n")
-        total += n
+    # Read platform config
+    settings = get_settings(db)
+    enabled_langs = get_enabled_languages(db)
+    print(f"[config] enabled languages: {enabled_langs}")
 
+    # ── fundus ──────────────────────────────────────────────────────
+    if SOURCE_ARG in ("fundus", "both"):
+        interval_min = int(settings.get("fundus_fetch_interval_minutes", "30"))
+        last_fetch_str = settings.get("fundus_last_fetch_at", "").strip()
+        run_fundus = True
+
+        if last_fetch_str:
+            try:
+                last_fetch = datetime.fromisoformat(last_fetch_str.replace("Z", "+00:00"))
+                elapsed_min = (datetime.now(timezone.utc) - last_fetch).total_seconds() / 60
+                if elapsed_min < interval_min:
+                    print(f"[fundus] skipping — last run {elapsed_min:.1f}m ago, interval={interval_min}m")
+                    run_fundus = False
+                else:
+                    print(f"[fundus] due — last run {elapsed_min:.1f}m ago, interval={interval_min}m")
+            except Exception as e:
+                print(f"[fundus] interval parse error: {e}")
+
+        if run_fundus:
+            print(f"\n=== fundus: crawling major publishers ===")
+            n = fetch_fundus(db, enabled_langs)
+            print(f"fundus: {n} articles processed\n")
+            total += n
+            # Record successful run time
+            try:
+                now_iso = datetime.now(timezone.utc).isoformat()
+                db.table("platform_settings").update({
+                    "value": now_iso,
+                    "updated_at": now_iso,
+                }).eq("key", "fundus_last_fetch_at").execute()
+            except Exception as e:
+                print(f"[fundus] failed to update last_fetch_at: {e}")
+
+    # ── GDELT ────────────────────────────────────────────────────────
     if SOURCE_ARG in ("gdelt", "both"):
-        print("=== GDELT + trafilatura: supplementary coverage ===")
-        n = fetch_gdelt(db)
-        print(f"GDELT: {n} articles inserted\n")
+        print("=== GDELT: supplementary multilingual coverage ===")
+        n = fetch_gdelt(db, enabled_langs)
+        print(f"GDELT: {n} articles processed\n")
         total += n
 
     elapsed = round(time.time() - t0, 1)

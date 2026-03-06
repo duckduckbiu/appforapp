@@ -884,3 +884,35 @@
 **需要配置的 GitHub Secrets**：
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`（service role key，不是 anon key）
+
+### 24. 新闻抓取：动态语言同步 + 管理台控制抓取频率
+
+**文件**：
+- `platform/supabase/migrations/20260307600000_platform_settings.sql`（新建）
+- `scripts/fetch_news.py`（修改）
+- `.github/workflows/gdelt-fundus-fetch.yml`（修改）
+
+**变更**：
+- 新建 `platform_settings` 表（key-value，含 RLS：公开读、admin 写）
+  - `fundus_fetch_interval_minutes`（默认 30）：管理台可调，控制实际抓取间隔
+  - `fundus_last_fetch_at`：脚本每次 fundus 完成后自动写入
+- GitHub Actions cron 改为 `*/10 * * * *`（每 10 分钟触发），脚本内部检查间隔决定是否真正运行
+- `LANG_MAP`：Chinese/zho/chi 修正为 `zh-CN`（原来错误地映射为 `zh`）
+- 静态 `GDELT_QUERIES` → `PLATFORM_TO_GDELT` 字典，从 DB `platform_languages` 表动态读取启用语言，构建 GDELT 查询（相同 GDELT 语言码自动去重）
+- `fetch_fundus()` + `fetch_gdelt()` 新增 `enabled_langs` 参数；fundus 抓到的文章若语言不在启用列表中则跳过
+
+### 25. 新闻源管理界面重写：fundus/GDELT 引擎控制台
+
+**文件**：
+- `platform/src/hooks/usePlatformSettings.ts`（新建）
+- `platform/src/components/admin/FeedEnginePanel.tsx`（新建）
+- `platform/src/pages/admin/AdminFeedSources.tsx`（修改）
+
+**变更**：
+- 新建 `usePlatformSettings` + `useUpdatePlatformSetting` hook，读写 `platform_settings` 表
+- 新建 `FeedEnginePanel` 组件替换 `FeedSourcesManager`（后者保留，待后续清理），包含 4 个 Card：
+  1. **抓取引擎状态**：文章总量、上次/下次 fundus 运行时间、可编辑抓取间隔（保存写入 DB）
+  2. **fundus**：活跃语言（来自 `useEnabledLanguages`）、33 个国家版本徽章、相关参数
+  3. **GDELT**：查询表（由启用语言动态生成，zh-CN/zh-TW 自动去重，ko 标注暂不支持）
+  4. **数据管理**：一键清除 feed_sources 表中 198 条旧 RSS 源（AlertDialog 二次确认）
+- `FeedEnginePanel` 内置 `PLATFORM_TO_GDELT` 常量，与 `scripts/fetch_news.py` 保持同步

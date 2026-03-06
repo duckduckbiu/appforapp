@@ -159,6 +159,31 @@ function sanitizeHtml(html: string): string {
   return clean;
 }
 
+// Inject extra images into HTML at paragraph boundaries (evenly spaced)
+function injectImagesIntoHtml(html: string, images: FeedImageInfo[]): string {
+  if (!images.length || !html) return html;
+  const parts = html.split("</p>");
+  const paraCount = parts.length - 1;
+  if (paraCount <= 0) return html;
+  const insertions = new Map<number, FeedImageInfo>();
+  const interval = Math.max(1, Math.ceil(paraCount / (images.length + 1)));
+  images.forEach((img, i) => {
+    insertions.set(Math.min(interval * (i + 1) - 1, paraCount - 1), img);
+  });
+  return parts.map((part, i) => {
+    if (i === parts.length - 1) return part;
+    let chunk = part + "</p>";
+    const img = insertions.get(i);
+    if (img && /^https?:\/\//.test(img.url)) {
+      const alt = (img.alt || "")
+        .replace(/&/g, "&amp;").replace(/"/g, "&quot;")
+        .replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      chunk += `<figure style="margin:1.25rem 0"><img src="${img.url}" alt="${alt}" loading="lazy" style="width:100%;border-radius:0.75rem;display:block" />${alt ? `<figcaption style="font-size:0.75rem;padding:0.375rem 0.75rem;font-style:italic;opacity:0.6">${alt}</figcaption>` : ""}</figure>`;
+    }
+    return chunk;
+  }).join("");
+}
+
 // --- Video embed component ---
 
 function VideoEmbed({ video }: { video: FeedVideoInfo }) {
@@ -234,6 +259,26 @@ function FeedDetailPanel({
     if (Array.isArray(item.videos)) return item.videos;
     try { return JSON.parse(item.videos as unknown as string) || []; } catch { return []; }
   }, [item.videos]);
+
+  // Extra images (skip hero at index 0) for interleaving
+  const extraImages = useMemo(() => extractedImages.slice(1), [extractedImages]);
+
+  // For plain-text articles: split into paragraphs for image interleaving
+  const plainParagraphs = useMemo(() => {
+    if (hasFullContent || !displayContent) return [];
+    return displayContent.split(/\n\n+/).filter((p) => p.trim().length > 0);
+  }, [hasFullContent, displayContent]);
+
+  // Map: paragraph index → image to insert after it
+  const plainImageInsertions = useMemo(() => {
+    const map = new Map<number, FeedImageInfo>();
+    if (!extraImages.length || !plainParagraphs.length) return map;
+    const interval = Math.max(1, Math.ceil(plainParagraphs.length / (extraImages.length + 1)));
+    extraImages.forEach((img, i) => {
+      map.set(Math.min(interval * (i + 1) - 1, plainParagraphs.length - 1), img);
+    });
+    return map;
+  }, [extraImages, plainParagraphs]);
 
   const handleShare = async () => {
     if (navigator.share && item.url) {
@@ -344,20 +389,52 @@ function FeedDetailPanel({
             </div>
           )}
 
-          {/* Content: full HTML or plain text */}
+          {/* Content: images injected at paragraph boundaries */}
           {hasFullContent ? (
             <div
-              className="prose prose-sm dark:prose-invert max-w-none
+              className="prose dark:prose-invert max-w-none
                 prose-img:rounded-xl prose-img:my-4
                 prose-a:text-primary prose-a:no-underline hover:prose-a:underline
-                prose-headings:text-foreground prose-p:text-foreground/90
-                prose-blockquote:border-l-primary/50
-                text-[15px] leading-relaxed"
-              dangerouslySetInnerHTML={{ __html: sanitizeHtml(displayContent) }}
+                prose-headings:text-foreground prose-headings:font-semibold prose-headings:tracking-tight
+                prose-h2:text-xl prose-h2:mt-8 prose-h2:mb-3
+                prose-h3:text-lg prose-h3:mt-6 prose-h3:mb-2
+                prose-p:text-foreground/90 prose-p:leading-relaxed
+                prose-strong:text-foreground
+                prose-li:text-foreground/90
+                prose-blockquote:border-l-primary/50 prose-blockquote:text-muted-foreground
+                leading-relaxed"
+              dangerouslySetInnerHTML={{ __html: injectImagesIntoHtml(sanitizeHtml(displayContent), extraImages) }}
             />
           ) : displayContent ? (
-            <div className="text-[15px] leading-relaxed text-foreground/90 whitespace-pre-line">
-              {displayContent}
+            <div className="text-[15px] leading-relaxed text-foreground/90">
+              {plainParagraphs.length > 0
+                ? plainParagraphs.flatMap((para, i) => {
+                    const img = plainImageInsertions.get(i);
+                    const nodes = [
+                      <p key={`p-${i}`} className="mb-3 whitespace-pre-line">{para}</p>,
+                    ];
+                    if (img) {
+                      nodes.push(
+                        <div key={`img-${i}`} className="my-4 rounded-xl overflow-hidden bg-muted">
+                          <img
+                            src={img.url}
+                            alt={img.alt || ""}
+                            className="w-full object-cover"
+                            loading="lazy"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).parentElement!.style.display = "none";
+                            }}
+                          />
+                          {img.alt && (
+                            <p className="text-xs text-muted-foreground px-3 py-1.5 italic">{img.alt}</p>
+                          )}
+                        </div>
+                      );
+                    }
+                    return nodes;
+                  })
+                : <p className="whitespace-pre-line">{displayContent}</p>
+              }
             </div>
           ) : null}
 
