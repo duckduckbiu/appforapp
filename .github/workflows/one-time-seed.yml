@@ -5,26 +5,12 @@ jobs:
   seed:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
       - run: pip install supabase
-      - run: |
-          python3 -c "
-import os
-from supabase import create_client
-db = create_client(os.environ['SUPABASE_URL'], os.environ['SUPABASE_SERVICE_ROLE_KEY'])
-sources = [
-    {'name': '新浪新闻', 'source_type': 'browser_use', 'source_url': 'https://news.sina.com.cn/', 'category': 'news', 'language': 'zh-CN', 'is_active': True, 'fetch_interval_minutes': 120, 'description': '新浪新闻首页'},
-    {'name': '腾讯新闻', 'source_type': 'browser_use', 'source_url': 'https://news.qq.com/', 'category': 'news', 'language': 'zh-CN', 'is_active': True, 'fetch_interval_minutes': 120, 'description': '腾讯新闻首页'},
-    {'name': 'BBC News', 'source_type': 'browser_use', 'source_url': 'https://www.bbc.com/news', 'category': 'news', 'language': 'en', 'is_active': True, 'fetch_interval_minutes': 120, 'description': 'BBC News homepage'},
-    {'name': 'Reuters', 'source_type': 'browser_use', 'source_url': 'https://www.reuters.com/', 'category': 'news', 'language': 'en', 'is_active': True, 'fetch_interval_minutes': 120, 'description': 'Reuters homepage'},
-]
-result = db.table('feed_sources').insert(sources).execute()
-print(f'Inserted {len(result.data)} sources')
-for s in result.data:
-    print(f'  + {s[\"name\"]} ({s[\"language\"]}) - {s[\"source_url\"]}')
-"
+      - run: python scripts/seed_browser_sources.py
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
