@@ -56,6 +56,45 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _normalize_title(title: str) -> str:
+    """Normalize title for dedup: lowercase, strip punctuation & extra spaces."""
+    if not title:
+        return ""
+    t = title.lower().strip()
+    # Remove common punctuation
+    t = re.sub(r'[^\w\s\u4e00-\u9fff\u3400-\u4dbf]', ' ', t)
+    t = re.sub(r'\s+', ' ', t).strip()
+    return t[:500]
+
+
+def _backfill_normalized_titles(db):
+    """One-time backfill: set normalized_title and content_hash for existing articles."""
+    try:
+        result = (
+            db.table("aggregated_feed")
+            .select("id, title, polished_title, full_content")
+            .is_("normalized_title", "null")
+            .limit(200)
+            .execute()
+        )
+        rows = result.data or []
+        if not rows:
+            return
+
+        print(f"[backfill] updating {len(rows)} articles with normalized_title + content_hash...")
+        for r in rows:
+            title = r.get("polished_title") or r.get("title") or ""
+            content = r.get("full_content") or ""
+            update = {
+                "normalized_title": _normalize_title(title),
+                "content_hash": hashlib.sha256(content.encode()).hexdigest()[:40],
+            }
+            db.table("aggregated_feed").update(update).eq("id", r["id"]).execute()
+        print(f"[backfill] ✓ done")
+    except Exception as e:
+        print(f"[backfill] warning: {e}")
+
+
 # ── Phase 1: Render page with Playwright & extract article links ─────
 
 async def extract_article_links(source_url: str, source_name: str, max_articles: int) -> list[dict]:
@@ -747,6 +786,10 @@ async def process_source(db, source: dict) -> int:
         if not pub_date:
             pub_date = now_iso()
 
+        # Generate normalized_title and content_hash for dedup/clustering
+        normalized_title = _normalize_title(polished_title or art_title)
+        content_hash = hashlib.sha256((full_text or "").encode()).hexdigest()[:40]
+
         row = {
             "source": domain,
             "source_id": url_hash(art_url),
@@ -772,6 +815,8 @@ async def process_source(db, source: dict) -> int:
             "ai_summary": ai_summary,
             "ai_model": LLM_MODEL,
             "ai_processed_at": now_iso() if ai_status == "done" else None,
+            "normalized_title": normalized_title,
+            "content_hash": content_hash,
         }
 
         if insert_article(db, row):
@@ -793,6 +838,9 @@ async def main() -> None:
     print(f"[config] model={LLM_MODEL} (polish only), max_per_source={MAX_ARTICLES_PER_SOURCE}")
     print(f"[config] LLM calls = 1 per article (polish only)")
 
+    # Backfill normalized_title for existing articles (one-time)
+    _backfill_normalized_titles(db)
+
     sources = get_browser_sources(db)
     print(f"[scraper] found {len(sources)} active sources")
 
@@ -810,6 +858,15 @@ async def main() -> None:
             update_source_stats(db, source["id"], 0, str(e)[:500])
 
         await asyncio.sleep(2)
+
+    # Run clustering for deduplicated_feed view
+    if total > 0:
+        try:
+            print("\n[cluster] running feed deduplication...")
+            db.rpc("cluster_feed_items").execute()
+            print("[cluster] ✓ done")
+        except Exception as e:
+            print(f"[cluster] warning: {e}")
 
     elapsed = round(time.time() - t0, 1)
     print(f"\n{'='*60}")
