@@ -147,11 +147,11 @@ async def extract_articles_from_site(source_url: str, source_name: str, max_arti
 
     try:
         task = EXTRACT_TASK_TEMPLATE.format(url=source_url, max_articles=max_articles)
-        agent = Agent(task=task, llm=llm, browser=browser)
-        result = await agent.run()
+        agent = Agent(task=task, llm=llm, browser_session=browser)
+        history = await agent.run()
 
-        # Parse the result - extract JSON from agent output
-        result_text = str(result)
+        # Extract final result text from agent history
+        result_text = history.final_result() or ""
         articles = _parse_json_array(result_text)
 
         if articles:
@@ -166,7 +166,7 @@ async def extract_articles_from_site(source_url: str, source_name: str, max_arti
         traceback.print_exc()
         return []
     finally:
-        await browser.close()
+        await browser.stop()
 
 
 async def extract_full_article(article_url: str) -> Optional[dict]:
@@ -178,10 +178,10 @@ async def extract_full_article(article_url: str) -> Optional[dict]:
 
     try:
         task = EXTRACT_ARTICLE_TASK_TEMPLATE.format(url=article_url)
-        agent = Agent(task=task, llm=llm, browser=browser)
-        result = await agent.run()
+        agent = Agent(task=task, llm=llm, browser_session=browser)
+        history = await agent.run()
 
-        result_text = str(result)
+        result_text = history.final_result() or ""
         article_data = _parse_json_object(result_text)
         return article_data
 
@@ -189,7 +189,7 @@ async def extract_full_article(article_url: str) -> Optional[dict]:
         print(f"    [extract] {article_url[:60]} error: {e}")
         return None
     finally:
-        await browser.close()
+        await browser.stop()
 
 
 async def polish_article(title: str, content: str) -> Optional[dict]:
