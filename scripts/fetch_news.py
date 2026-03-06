@@ -21,6 +21,7 @@ import hashlib
 import json
 import os
 import time
+import traceback
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -205,11 +206,24 @@ def fetch_fundus(db) -> int:
 
                 source_id = url_hash(url)
 
-                # Body text
+                # Body text — handle both property and callable .text
                 body_text = ""
                 body_obj = getattr(article, "body", None)
                 if body_obj is not None:
-                    body_text = getattr(body_obj, "text", None) or str(body_obj) or ""
+                    text_attr = getattr(body_obj, "text", None)
+                    if callable(text_attr):
+                        try:
+                            body_text = str(text_attr()) or ""
+                        except Exception:
+                            body_text = str(body_obj) or ""
+                    elif isinstance(text_attr, str):
+                        body_text = text_attr
+                    elif text_attr is not None:
+                        body_text = str(text_attr)
+                    else:
+                        body_text = str(body_obj) or ""
+                if not isinstance(body_text, str):
+                    body_text = ""
 
                 # Images
                 images: list[dict] = []
@@ -269,6 +283,7 @@ def fetch_fundus(db) -> int:
 
             except Exception as e:
                 print(f"  [fundus] article error: {e}")
+                traceback.print_exc()
 
     except Exception as e:
         print(f"[fundus] crawler error: {e}")

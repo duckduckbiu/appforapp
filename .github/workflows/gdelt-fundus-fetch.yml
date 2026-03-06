@@ -55,6 +55,7 @@ jobs:
           SOURCE: ${{ github.event.inputs.source || 'both' }}
           MAX_FUNDUS_ARTICLES: ${{ github.event.inputs.max_fundus || '50' }}
           MAX_GDELT_PER_QUERY: ${{ github.event.inputs.max_gdelt || '20' }}
+          PYTHONUNBUFFERED: '1'
         run: |
           cd scripts
           python fetch_news.py
